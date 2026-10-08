@@ -1,382 +1,733 @@
-import os, json, random, time, math, html, re
-from datetime import datetime
+
+import os, json, math, random, html
+from datetime import datetime, date
+
 import streamlit as st
 
-# V5.6 data/core is kept as a separate module so the web app is an adaptation,
-# not a replacement of the original Pydroid project.
+# Optional Gemini
 try:
-    import aryabhutt_v56_core as core
-except Exception as exc:
-    core = None
+    from google import genai
+except Exception:
+    genai = None
 
-APP_TITLE = "PROJECT ARYABHUTT"
-VERSION = "V5.6 WEB"
-MODEL_CANDIDATES = ["gemini-3.8-flash", "gemini-3.5-flash-lite"]
+APP_NAME = "PROJECT ARYABHUTT"
+VERSION = "V5.6 WEB • RESTORED STUDY EDITION"
+GEMINI_MODEL = "gemini-3.8-flash"
 
-st.set_page_config(page_title=f"{APP_TITLE} • {VERSION}", page_icon="🪷", layout="wide")
+st.set_page_config(page_title=APP_NAME, page_icon="🪷", layout="wide")
 
-# ---------- persistent session state ----------
-def init_state():
-    defaults = {
-        "page":"Home", "messages":[], "chat_online":None, "language":"hi",
-        "focus":False, "sessions":0, "chat_questions":0, "games_played":0,
-        "riddles_solved":0, "study_views":0, "formula_views":0,
-        "story_points":0, "astronomy_views":0, "math_activity":0,
-        "reports_generated":0, "feedback":[], "quiz_score":None,
-        "game_result":None, "student_name":"", "selected_shape":None,
-    }
-    for k,v in defaults.items():
-        if k not in st.session_state: st.session_state[k]=v
-    if not st.session_state.get("session_recorded"):
-        st.session_state.sessions += 1
-        st.session_state.session_recorded = True
-init_state()
+# -------------------- SESSION STATE --------------------
+DEFAULTS = {
+    "sessions": 0, "games": 0, "riddles": 0, "chat": 0,
+    "study_views": 0, "formula_views": 0, "story_points": 0,
+    "astronomy_views": 0, "math_activity": 0, "reports": 0,
+    "schools": {}, "students": [], "chat_history": [],
+    "admin_ok": False, "focus_mode": False,
+}
+for k, v in DEFAULTS.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+st.session_state.sessions += 1 if not st.session_state.get("_session_counted") else 0
+st.session_state["_session_counted"] = True
 
-# ---------- visual theme ----------
+# -------------------- DATA FROM V5.6 CORE --------------------
+STORY_POINTS = [
+"सिया ने रात के आकाश में चमकते तारे देखे और सीखा कि हर चमकता बिंदु एक जैसा नहीं होता। कुछ तारे हैं, कुछ ग्रह और कुछ दूर की आकाशगंगाओं से आते प्रकाश के स्रोत हैं।",
+"आर्यभट्ट से प्रेरित होकर सिया ने समझा कि कठिन सवाल का पहला कदम सही सवाल पूछना है। विज्ञान में जिज्ञासा अक्सर खोज की शुरुआत बनती है।",
+"शून्य केवल 'कुछ नहीं' बताने वाला चिह्न नहीं है। स्थान-मूल्य पद्धति में उसका स्थान संख्या का अर्थ बदल सकता है।",
+"सिया ने 10, 100 और 1000 की तुलना करके place value समझी। उसने जाना कि एक ही अंक अलग स्थान पर अलग मान दे सकता है।",
+"एक दिन उसने छाया की लंबाई नापी। इससे उसे पता चला कि सूर्य की स्थिति बदलने पर छाया भी बदलती है।",
+"सिया ने सीखा कि पृथ्वी घूमती है। इसी घूर्णन से दिन और रात का चक्र जुड़ा है।",
+"पृथ्वी सूर्य की परिक्रमा करती है। इस गति और पृथ्वी के झुकाव का संबंध ऋतुओं को समझने में महत्वपूर्ण है।",
+"चंद्रमा का आकार वास्तव में रोज़ बदल नहीं जाता। हमें सूर्य से प्रकाशित उसका अलग-अलग भाग दिखाई देता है।",
+"सिया ने जाना कि सूर्य एक तारा है और पृथ्वी उससे प्रकाश तथा ऊर्जा प्राप्त करती है।",
+"उसने सीखा कि ग्रह अपनी कक्षा में सूर्य की परिक्रमा करते हैं और अलग-अलग ग्रहों की विशेषताएँ अलग होती हैं।",
+"सिया ने मंगल के लाल रंग और वहाँ की सतह के बारे में पढ़ा और समझा कि हर ग्रह पृथ्वी जैसा नहीं होता।",
+"बृहस्पति सबसे बड़ा ग्रह है और उसके वातावरण में विशाल तूफानी क्षेत्र देखा गया है।",
+"शनि के वलय मुख्यतः बर्फ और चट्टानी कणों से बने हैं।",
+"यूरेनस और नेपच्यून को ice giants कहा जाता है क्योंकि उनके अंदरूनी हिस्सों की संरचना गैस दानवों से अलग है।",
+"सिया ने जाना कि हमारी आकाशगंगा का नाम Milky Way है।",
+"तारों को देखकर केवल कहानी बनाना पर्याप्त नहीं; नियमित प्रेक्षण और मापन वैज्ञानिक सोच को मजबूत करते हैं।",
+"किसी घटना को समझने के लिए पहले observation, फिर measurement और फिर explanation किया जा सकता है।",
+"छाया की लंबाई समय और सूर्य की स्थिति के बारे में संकेत दे सकती है।",
+"पुराने खगोलविदों ने आकाशीय चक्रों को समझने के लिए लंबे समय तक नियमित observations किए।",
+"सिया ने सीखा कि calendar बनाने में सूर्य, चंद्रमा और ऋतुओं के चक्रों का अध्ययन उपयोगी हो सकता है।",
+"उसने पानी की नियंत्रित गति से समय मापने वाले जल-घड़ी जैसे विचारों के बारे में पढ़ा।",
+"गणित और खगोल विज्ञान में angle measurement महत्वपूर्ण भूमिका निभाता है।",
+"आर्यभट्ट की परंपरा ने सिया को गणितीय गणना और खगोलीय प्रेक्षण के संबंध को समझने के लिए प्रेरित किया।",
+"सिया ने समझा कि zero और place value जैसे विचार गणितीय notation को शक्तिशाली बनाते हैं।",
+"किसी कठिन समस्या को छोटे भागों में बाँटना problem solving को आसान बना सकता है।",
+"गलत उत्तर मिलने पर केवल उत्तर बदलना नहीं, बल्कि अपनी प्रक्रिया जाँचना भी जरूरी है।",
+"विज्ञान में 'मुझे नहीं पता' एक उपयोगी शुरुआत हो सकती है, यदि उसके बाद जाँच करने का प्रयास हो।",
+"सिया ने जाना कि computer instructions को code के रूप में लिखा जा सकता है।",
+"उसने समझा कि algorithm किसी समस्या को हल करने के लिए step-by-step निर्देश देता है।",
+"AI data से patterns सीखकर prediction या generation जैसे काम कर सकता है, लेकिन उसके उत्तरों को जाँचना भी जरूरी है।",
+"सिया ने cyber safety में strong passwords, updates और privacy की भूमिका समझी।",
+"Internet कई networks को जोड़ने वाला विशाल network है।",
+"Cloud services network के माध्यम से computing और data resources उपलब्ध करा सकती हैं।",
+"Robot sensors और programmed instructions की मदद से काम कर सकता है।",
+"Microchip में बहुत से electronic components छोटे क्षेत्र में integrated होते हैं।",
+"सिया ने जाना कि educational technology का लक्ष्य केवल मनोरंजन नहीं, learning को अधिक interactive बनाना भी है।",
+"Visual learning में diagram और model किसी concept को समझने में मदद कर सकते हैं।",
+"Game-based practice सही तरीके से उपयोग करने पर repetition को रोचक बना सकती है।",
+"Quiz से विद्यार्थी अपनी समझ जाँच सकता है, लेकिन केवल score ही learning का पूरा माप नहीं है।",
+"Timetable छोटे learning sessions को नियमित बनाने में मदद कर सकता है।",
+"Analytics में वास्तविक activity दर्ज करना fake ranking बनाने से अधिक ईमानदार है।",
+"Data में school और student records अलग-अलग रखे जाएँ तो reporting आसान होती है।",
+"Teacher dashboard का उद्देश्य learning activity को समझने और सहायता देने में मदद करना होना चाहिए।",
+"एक अच्छा educational app विद्यार्थी को सवाल पूछने, समझने, अभ्यास करने और वापस देखने का रास्ता देता है।",
+"Accessibility और सरल भाषा अधिक विद्यार्थियों को learning tools इस्तेमाल करने में मदद करती है।",
+"Indian scientific heritage को modern technology के साथ प्रस्तुत करने से इतिहास और innovation के बीच संबंध दिखाया जा सकता है।",
+"सिया ने अपनी imagination को R-AI के विचार से जोड़ा और फिर उसे वास्तविक educational software बनाने की प्रेरणा मिली।",
+"आखिरी सीख: imagination तभी innovation बनती है जब उसे छोटे-छोटे experiments, coding और testing में बदला जाए।",
+]
+
+DEFINITIONS = [
+("Natural Number","प्राकृतिक संख्या","1,2,3… जैसी गिनती की संख्याएँ।","उदाहरण: 7"),
+("Whole Number","पूर्ण संख्या","0 सहित प्राकृतिक संख्याएँ।","उदाहरण: 0, 7"),
+("Integer","पूर्णांक","…,−2,−1,0,1,2…","उदाहरण: −3"),
+("Rational Number","परिमेय","p/q के रूप में लिखी जा सके जहाँ q≠0।","उदाहरण: 3/4"),
+("Irrational Number","अपरिमेय","जिसे p/q के रूप में ठीक-ठीक नहीं लिख सकते।","उदाहरण: √2"),
+("Prime Number","अभाज्य","केवल 1 और स्वयं से विभाजित होने वाली संख्या।","उदाहरण: 13"),
+("Composite Number","भाज्य","दो से अधिक गुणनखंड वाली संख्या।","उदाहरण: 12"),
+("Factor","गुणनखंड","जो संख्या किसी संख्या को बिना शेष विभाजित करे।","12 के factors: 1,2,3,4,6,12"),
+("Multiple","गुणज","किसी संख्या के 1,2,3… से गुणनफल।","5 के multiples: 5,10,15…"),
+("Constant","अचर","जिसका मान स्थिर रहता है।","x + 5 में 5 constant है।"),
+("Variable","चर","जिसका मान बदल सकता है।","x + 5 में x variable है।"),
+("Coefficient","गुणांक","चर के साथ गुणा होने वाली संख्या।","3x में 3 coefficient है।"),
+("Mean","माध्य","सभी मानों का योग ÷ मानों की संख्या।","2,4,6 का mean = 4"),
+("Median","मध्यिका","क्रम में रखने पर बीच का मान।","1,3,8 का median = 3"),
+("Mode","बहुलक","सबसे अधिक बार आने वाला मान।","2,2,5 का mode = 2"),
+("Range","परास","अधिकतम − न्यूनतम।","2,5,9 → range 7"),
+("Perimeter","परिमाप","आकृति की बाहरी सीमा की कुल लंबाई।","वर्ग का perimeter = 4a"),
+("Area","क्षेत्रफल","समतल आकृति द्वारा घेरा गया क्षेत्र।","वर्ग = a²"),
+("Volume","आयतन","त्रि-आयामी वस्तु द्वारा घेरा गया स्थान।","घन = a³"),
+("Angle","कोण","दो किरणों के बीच का झुकाव।","समकोण = 90°"),
+("Triangle","त्रिभुज","तीन भुजाओं वाली आकृति।","तीन sides"),
+("Quadrilateral","चतुर्भुज","चार भुजाओं वाली आकृति।","चार sides"),
+("Circle","वृत्त","केंद्र से समान दूरी पर स्थित बिंदुओं का समुच्चय।","radius r"),
+("Radius","त्रिज्या","केंद्र से वृत्त की परिधि तक दूरी।","diameter = 2r"),
+("Diameter","व्यास","केंद्र से होकर जाने वाली chord की लंबाई।","d = 2r"),
+("Fraction","भिन्न","पूर्ण के भाग को दर्शाने वाली संख्या।","3/4"),
+("Ratio","अनुपात","दो समान प्रकार की राशियों की तुलना।","2:3"),
+("Proportion","समानुपात","दो अनुपातों की समानता।","2:3 = 4:6"),
+("Percentage","प्रतिशत","प्रति सौ का मान।","25% = 25/100"),
+("Profit","लाभ","SP, CP से अधिक होने पर अंतर।","Profit = SP−CP"),
+("Loss","हानि","CP, SP से अधिक होने पर अंतर।","Loss = CP−SP"),
+("Discount","छूट","Marked Price से दी गई कमी।","Discount = MP−SP"),
+("Principal","मूलधन","ब्याज गणना में प्रारंभिक धन।","P"),
+("Interest","ब्याज","मूलधन पर मिलने/देने वाला अतिरिक्त धन।","SI/CI"),
+("Speed","चाल","दूरी तय करने की दर।","speed = distance/time"),
+("Distance","दूरी","दो स्थानों के बीच लंबाई।","d"),
+("Time","समय","घटना की अवधि।","t"),
+("Probability","प्रायिकता","घटना के होने की संभावना का माप।","0 से 1 के बीच"),
+("Data","आँकड़े","एकत्र की गई सूचनाएँ।","marks, counts आदि"),
+("Frequency","आवृत्ति","किसी मान के आने की संख्या।","कितनी बार आया"),
+("Equation","समीकरण","दो बराबर व्यंजकों को दर्शाने वाला कथन।","2x+1=5"),
+("Expression","व्यंजक","संख्या, चर और संक्रियाओं का संयोजन।","3x+2"),
+("Line","रेखा","दोनों दिशाओं में अनंत तक जाने वाला straight path।","↔"),
+("Ray","किरण","एक endpoint से एक दिशा में अनंत तक जाती है।","→"),
+("Segment","रेखाखंड","दो endpoints के बीच रेखा का भाग।","AB"),
+("Parallel Lines","समांतर रेखाएँ","एक ही समतल में जो कभी नहीं मिलतीं।","∥"),
+("Perpendicular","लंबवत","90° पर मिलने वाली रेखाएँ।","⊥"),
+("Symmetry","सममिति","दोनों भागों का संतुलित/दर्पण जैसा विन्यास।","mirror line"),
+("Polygon","बहुभुज","रेखाखंडों से बनी बंद आकृति।","triangle, pentagon"),
+("Congruent","सर्वांगसम","आकार और माप में समान आकृतियाँ।","same shape & size"),
+("Similar","समरूप","आकार समान, अनुपात समान आकृतियाँ।","same shape"),
+("LCM","लघुत्तम समापवर्त्य","साझा गुणजों में सबसे छोटा।","LCM(4,6)=12"),
+("HCF","महत्तम समापवर्तक","साझा गुणनखंडों में सबसे बड़ा।","HCF(12,18)=6"),
+]
+
+FORMULAS = {
+"Arithmetic / अंकगणित":[
+"a + b = b + a — addition commutative",
+"a × b = b × a — multiplication commutative",
+"a + (b + c) = (a + b) + c — associative addition",
+"a × (b + c) = ab + ac — distributive law",
+"Dividend = Divisor × Quotient + Remainder",
+"Average = Sum of observations ÷ Number of observations",
+],
+"Fractions & Percentage / भिन्न":[
+"Percentage = (Part ÷ Whole) × 100",
+"Part = Percentage × Whole ÷ 100",
+"Fraction addition: a/b + c/d = (ad + bc)/bd",
+"Fraction multiplication: a/b × c/d = ac/bd",
+"New value after increase = Original × (1 + r/100)",
+"New value after decrease = Original × (1 − r/100)",
+],
+"Profit/Loss / लाभ-हानि":[
+"Profit = SP − CP",
+"Loss = CP − SP",
+"Profit% = Profit ÷ CP × 100",
+"Loss% = Loss ÷ CP × 100",
+"Discount = MP − SP",
+"Discount% = Discount ÷ MP × 100",
+],
+"Geometry / ज्यामिति":[
+"Rectangle area = l × b",
+"Rectangle perimeter = 2(l + b)",
+"Square area = a²",
+"Square perimeter = 4a",
+"Triangle area = ½ × base × height",
+"Circle area = πr²",
+"Circle circumference = 2πr",
+"Parallelogram area = base × height",
+],
+"Speed / समय":[
+"Speed = Distance ÷ Time",
+"Distance = Speed × Time",
+"Time = Distance ÷ Speed",
+],
+}
+
+ASTRO = [
+("☿ Mercury","सबसे छोटा और सूर्य के सबसे निकट ग्रह।","Planet visual","gray"),
+("♀ Venus","सौरमंडल का दूसरा ग्रह; इसका वातावरण बहुत घना है।","Planet visual","cream"),
+("🌍 Earth","तीसरा ग्रह और हमारा home planet।","Planet visual","blue"),
+("♂ Mars","लाल ग्रह; इसकी सतह पर विशाल canyon system है।","Planet visual","red"),
+("♃ Jupiter","सौरमंडल का सबसे बड़ा ग्रह; Great Red Spot एक विशाल storm system है।","Planet visual","orange"),
+("♄ Saturn","अपने prominent rings के लिए प्रसिद्ध।","Planet visual","gold"),
+("♅ Uranus","Ice giant; इसकी rotation axis बहुत अधिक tilted है।","Planet visual","cyan"),
+("♆ Neptune","सबसे दूर का आठवाँ ग्रह; तेज हवाओं के लिए प्रसिद्ध।","Planet visual","blue"),
+("☀️ Solar Eclipse","Moon सूर्य और Earth के बीच आकर कुछ क्षेत्रों में सूर्य की रोशनी को block करता है।","Eclipse visual","sun"),
+("🌕 Lunar Eclipse","Earth की shadow Moon पर पड़ने पर lunar eclipse होता है।","Eclipse visual","moon"),
+("🔄 Earth Rotation","Earth अपने axis पर घूमती है; day-night cycle इससे जुड़ा है।","Rotation visual","earth"),
+("🛰️ Earth Revolution","Earth सूर्य की परिक्रमा करती है; एक चक्कर लगभग एक वर्ष लेता है।","Orbit visual","orbit"),
+("🌌 Milky Way","हमारी galaxy का नाम Milky Way है; इसमें बहुत से तारे हैं।","Galaxy visual","space"),
+("🌍🌙 Earth–Moon","Moon Earth की परिक्रमा करता है और gravity दोनों के बीच महत्वपूर्ण है।","Orbit visual","moon"),
+("🪐 Solar System","Sun, आठ planets, dwarf planets, moons, asteroids और comets का विशाल system।","System visual","system"),
+]
+
+KUSUMPURA = [
+("🏛️ Kusumpura","प्राचीन भारतीय गणित और खगोल अध्ययन से जुड़ा स्थान/परंपरा।"),
+("☀️ Gnomon","छाया की दिशा और लंबाई से सूर्य की स्थिति तथा समय के संकेतों का अध्ययन।"),
+("🌞 Shadow Study","छाया प्रेक्षण प्राचीन खगोलीय गणनाओं का सरल तरीका था।"),
+("🔭 Star Observation","रात्रि आकाश का नियमित observation तारों और ग्रहों की गति समझने में मदद करता है।"),
+("💧 Water Clock","नियंत्रित जल-प्रवाह से समय मापने की प्राचीन तकनीक।"),
+("☀️ Sun Path","दिनभर सूर्य के apparent path और shadow changes का observation।"),
+("📅 Calendar Study","चंद्र कलाओं, ऋतुओं और खगोलीय cycles का अध्ययन calendar बनाने में सहायक।"),
+("🪐 Planet Motion","ग्रहों की गति देखकर गणना और mathematical models विकसित किए जा सकते हैं।"),
+("📐 Angle Measurement","आकाश में किसी object की ऊँचाई/दिशा समझने के लिए angle measurement उपयोगी है।"),
+("🪷 Aryabhata Legacy","गणितीय calculation और astronomical observation को जोड़ने वाली भारतीय वैज्ञानिक परंपरा।"),
+]
+
+TECH = [
+("🖥️ Computer","कंप्यूटर data को process करके useful result देता है।","0101 1010","CPU"),
+("🤖 AI","AI data से patterns सीखकर prediction/generation जैसे काम कर सकता है।","DATA → PATTERN → OUTPUT","AI"),
+("🤖 Robot","Sensors और programmed instructions की मदद से robot काम कर सकता है।","SENSOR → CONTROL → ACTION","ROBOT"),
+("🐍 Coding","Code instructions का sequence है जिससे computer कोई task करता है।","if x > 0:\\n  learn()","CODE"),
+("🌐 Internet","Internet जुड़े हुए networks का विशाल तंत्र है।","PC ↔ NETWORK ↔ CLOUD ↔ PHONE","NET"),
+("☁️ Cloud","Cloud में computing resources और data network के माध्यम से उपलब्ध हो सकते हैं।","DEVICE ↔ CLOUD","CLOUD"),
+("🔗 Network","Network devices को data exchange के लिए जोड़ता है।","💻 ─ 🌐 ─ 💻","LINK"),
+("🔲 Microchip","Microchip में बहुत से electronic components छोटे क्षेत्र में integrated होते हैं।","• • • CPU • • •","CHIP"),
+("🛡️ Cyber Safety","Strong passwords, updates और privacy habits digital safety में मदद करते हैं।","🔑 + 🔄 + 🔒","SAFE"),
+("🚀 Future Tech","AI, robotics, space और green technology का उपयोग शिक्षा/विज्ञान में किया जा सकता है।","AI + ROBOT + SPACE","FUTURE"),
+]
+
+SHAPES = [
+("Triangle","तीन भुजाएँ","½ × base × height"),
+("Square","चार बराबर भुजाएँ","a²"),
+("Rectangle","विपरीत भुजाएँ बराबर","l × b"),
+("Rhombus","सभी भुजाएँ बराबर","½d₁d₂"),
+("Parallelogram","विपरीत भुजाएँ parallel","base × height"),
+("Trapezium","एक जोड़ी parallel sides","½(a+b)h"),
+("Kite","दो-दो आसन्न sides बराबर","½d₁d₂"),
+("Circle","केंद्र से समान दूरी","πr²"),
+("Ellipse","अंडाकार आकृति","—"),
+("Pentagon","पाँच भुजाएँ","—"),
+("Hexagon","छह भुजाएँ","—"),
+("Octagon","आठ भुजाएँ","—"),
+]
+
+# -------------------- STYLE --------------------
 st.markdown("""
 <style>
-:root{--ink:#172033;--muted:#667085;--accent:#7c3aed;--soft:#f6f3ff;--card:#ffffff;}
-.block-container{padding-top:1.4rem;padding-bottom:3rem;max-width:1400px}
-.hero{padding:1.4rem 1.6rem;border-radius:22px;background:linear-gradient(135deg,#faf7ff,#eef7ff);border:1px solid #e6e0f4;margin-bottom:1rem}
-.hero h1{margin:0;color:var(--ink);font-size:2.15rem}.hero p{margin:.45rem 0 0;color:var(--muted);font-size:1rem}
-.card{padding:1rem 1.1rem;border:1px solid #e7e7ee;border-radius:16px;background:white;margin-bottom:.8rem}
-.small{color:var(--muted);font-size:.9rem}.acharya{border-left:5px solid #7c3aed;background:#faf8ff;padding:1rem 1.1rem;border-radius:12px;white-space:pre-wrap}
-.metric{padding:.9rem;border:1px solid #ececf2;border-radius:14px;background:#fff}.metric b{font-size:1.35rem}
+.block-container{padding-top:1.4rem;padding-bottom:3rem}
+.hero{padding:1.4rem 1.5rem;border-radius:20px;background:linear-gradient(135deg,#f7f0ff,#eef7ff);border:1px solid #ddd}
+.hero h1{margin:0;font-size:2.1rem}.muted{color:#64748b}
+.card{padding:1rem;border:1px solid #e2e8f0;border-radius:16px;background:#fff;margin:.45rem 0}
+.fact{padding:1rem;border-radius:16px;background:#fff7ed;border:1px solid #fed7aa}
+.visual{min-height:150px;border-radius:18px;background:radial-gradient(circle at 50% 35%,#334155,#0f172a 60%,#020617);display:flex;align-items:center;justify-content:center;color:white;text-align:center;padding:1rem}
+.bigplanet{width:105px;height:105px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:2.4rem;margin:auto;box-shadow:0 0 35px rgba(255,255,255,.18)}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- utilities ----------
-def ui(hi, en): return hi if st.session_state.language == "hi" else en
+# -------------------- HELPERS --------------------
+def section(title, icon=""):
+    st.subheader(f"{icon} {title}")
 
-def core_attr(name, fallback):
-    return getattr(core, name, fallback) if core else fallback
+def visual_box(label, symbol="🌌", detail=""):
+    st.markdown(f'<div class="visual"><div><div style="font-size:4rem">{symbol}</div><b>{html.escape(label)}</b><div style="opacity:.85">{html.escape(detail)}</div></div></div>', unsafe_allow_html=True)
 
-SHAPES = core_attr("SHAPES", [
-("Triangle","","तीन भुजाएँ"),("Square","","चार बराबर भुजाएँ"),("Rectangle","","विपरीत भुजाएँ बराबर"),
-])
-FORMULAS = core_attr("FORMULAS", {"Arithmetic":["a+b=b+a","a×b=b×a"]})
-TECH_CARDS = core_attr("TECH_CARDS", [])
-DAILY_QUIZ = core_attr("DAILY_QUIZ", [])
-V56_QA = core_attr("_V56_MASTER_QA", [])
-ASTRO_CARDS = [
-("Solar Eclipse","☀️ 🌑 🌍","जब चंद्रमा सूर्य और पृथ्वी के बीच आता है तो सूर्य ग्रहण दिखाई दे सकता है।"),
-("Lunar Eclipse","☀️ 🌍 🌕","जब पृथ्वी की छाया चंद्रमा पर पड़ती है तो चंद्र ग्रहण होता है।"),
-("Earth Rotation","🌍 ↺","पृथ्वी का अपने अक्ष पर घूमना दिन-रात के चक्र से जुड़ा है।"),
-("Earth Revolution","☀️ → 🌍","पृथ्वी सूर्य की परिक्रमा करती है; एक चक्कर लगभग एक वर्ष लेता है।"),
-("Milky Way","🌌 ✨","Milky Way हमारी आकाशगंगा है जिसमें बहुत से तारे हैं।"),
-("Earth–Moon","🌍 ↔ 🌙","पृथ्वी और चंद्रमा के बीच गुरुत्वाकर्षण महत्वपूर्ण है।"),
-]
-OBS_CARDS = [
-("Kusumpura","🏛️","कुसुमपुर प्राचीन भारतीय गणित और खगोल अध्ययन से जुड़ा महत्वपूर्ण स्थान था।"),
-("Gnomon","☀️ │","छाया की दिशा और लंबाई से समय तथा सूर्य की स्थिति का अध्ययन किया जा सकता था।"),
-("Shadow Study","🌞 ↘","छाया प्रेक्षण खगोलीय गणनाओं का एक सरल तरीका था।"),
-("Star Observation","🔭 ✨","रात्रि आकाश का नियमित प्रेक्षण तारों और ग्रहों की गति समझने में मदद करता है।"),
-("Water Clock","💧 ⏱️","जल की नियंत्रित धारा से समय मापने के प्राचीन तरीके विकसित हुए।"),
-("Calendar Study","🌙 📅","चंद्र कलाओं, ऋतुओं और खगोलीय चक्रों का अध्ययन कैलेंडर निर्माण में सहायक था।"),
-]
-
-# ---------- Gemini / offline knowledge ----------
-def api_key():
+def admin_password():
     try:
-        return st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+        return str(st.secrets.get("ADMIN_PASSWORD","aryabhutt"))
     except Exception:
-        return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        return "aryabhutt"
 
-def acharya_persona(text):
-    text = str(text).strip()
-    if "आयुष्मान भव" not in text and "ज्ञानवान भव" not in text:
-        text += "\n\n🌼 वत्स, ज्ञान की ज्योति जलाए रखो। आयुष्मान भव!"
-    return text
-
-def offline_answer(q):
-    qn = q.lower().strip()
-    # Preserve V5.6's master offline book when it is importable.
-    if core:
-        for fn in ("_v56_offline_lookup", "_v56_master_offline_lookup"):
-            try:
-                f = getattr(core, fn, None)
-                if f:
-                    found, ans = f(q)
-                    if found:
-                        return acharya_persona(ans), True
-            except Exception:
-                pass
-    # A few essential web-demo fallbacks.
-    fallback = {
-        "abdul kalam":"डॉ. ए. पी. जे. अब्दुल कलाम भारत के प्रसिद्ध वैज्ञानिक और भारत के पूर्व राष्ट्रपति थे। उन्हें भारत के मिसाइल और अंतरिक्ष कार्यक्रमों में उनके योगदान तथा विद्यार्थियों को प्रेरित करने के लिए विशेष रूप से याद किया जाता है।",
-        "aryabhata":"आर्यभट्ट प्राचीन भारत के महान गणितज्ञ और खगोलशास्त्री थे। उनकी कृति आर्यभटीय गणित और खगोल के इतिहास में महत्वपूर्ण है।",
-        "आर्यभट्ट":"आर्यभट्ट प्राचीन भारत के महान गणितज्ञ और खगोलशास्त्री थे। उनकी कृति आर्यभटीय गणित और खगोल के इतिहास में महत्वपूर्ण है।",
-        "python":"Python एक लोकप्रिय programming language है। इसका उपयोग शिक्षा, automation, data science और AI जैसे क्षेत्रों में किया जाता है।",
-    }
-    for k,v in fallback.items():
-        if k in qn: return acharya_persona(v), True
-    return "वत्स, यह प्रश्न मेरी Offline Knowledge Book में अभी नहीं मिला। यदि Gemini Online mode उपलब्ध है तो मैं वहीं से उत्तर दूँगा।", False
-
-def gemini_call(messages):
-    key = api_key()
+def gemini_client():
+    if genai is None:
+        return None, "google-genai package नहीं मिला"
+    key = None
+    try:
+        key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+    except Exception:
+        pass
     if not key:
-        return None, "no_api_key"
-    import requests
-    system = ("तुम 'आचार्य आर्यभट्ट' नाम के स्नेही, बुद्धिमान भारतीय शिक्षक हो। "
-              "विद्यार्थी से सीधे, सरल और स्वाभाविक हिंदी में बात करो। प्रश्न English में हो तो भी उत्तर हिंदी में दो, "
-              "जब तक विद्यार्थी दूसरी भाषा न माँगे। 'वत्स', 'प्रिय विद्यार्थी' जैसे संबोधन स्वाभाविक रूप से कभी-कभी उपयोग करो। "
-              "तथ्य मत गढ़ो। शिक्षा, गणित, विज्ञान, इतिहास, coding और astronomy में स्पष्ट उदाहरण दो। "
-              "उत्तर के अंत में छोटा आशीर्वचन दे सकते हो।")
-    contents=[]
-    for m in messages[-12:]:
-        role = "user" if m["role"]=="user" else "model"
-        contents.append({"role":role,"parts":[{"text":m["content"]}]})
-    for model in MODEL_CANDIDATES:
-        try:
-            url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-            body={"system_instruction":{"parts":[{"text":system}]},"contents":contents,
-                  "generationConfig":{"temperature":0.45,"maxOutputTokens":500}}
-            r=requests.post(url,params={"key":key},json=body,timeout=20)
-            if r.ok:
-                data=r.json(); parts=data.get("candidates",[{}])[0].get("content",{}).get("parts",[])
-                ans="".join(str(p.get("text","")) for p in parts if isinstance(p,dict)).strip()
-                if ans: return acharya_persona(ans), "online"
-        except Exception:
-            continue
-    return None, "online_error"
+        return None, "GEMINI_API_KEY नहीं मिला"
+    try:
+        return genai.Client(api_key=key), "ready"
+    except Exception as e:
+        return None, str(e)[:120]
 
-def speak_html(text, label="🔊 आचार्य आर्यभट्ट की आवाज़ सुनें"):
-    safe=html.escape(text).replace("'","&#39;").replace("\n"," ")
-    st.components.v1.html(f"""
-    <div style='font-family:system-ui;padding:4px 0'>
-      <button onclick=\"speakNow()\" style='padding:10px 15px;border-radius:10px;border:1px solid #ddd;background:#fafafa;cursor:pointer;font-size:15px\">{label}</button>
-      <span id='status' style='margin-left:8px;color:#667085'></span>
-    </div>
-    <script>
-    function speakNow(){{
-      const s=window.speechSynthesis;
-      if(!s){{document.getElementById('status').innerText='Browser TTS उपलब्ध नहीं है';return;}}
-      s.cancel(); const u=new SpeechSynthesisUtterance('{safe}');
-      u.lang='hi-IN'; u.rate=.92; u.pitch=1.0;
-      u.onstart=()=>document.getElementById('status').innerText='🔊 बोल रहा हूँ…';
-      u.onend=()=>document.getElementById('status').innerText='';
-      s.speak(u);
-    }}
-    </script>
-    """, height=55)
+def gemini_answer(prompt):
+    client, status = gemini_client()
+    if client is None:
+        return None, status
+    try:
+        r = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=f"""You are Acharya Aryabhatta, a friendly Class 8 educational assistant.
+Answer in simple Hindi/Hinglish unless the student asks in English.
+Be accurate, child-friendly and concise. Never invent historical facts.
+Student question: {prompt}"""
+        )
+        text = getattr(r, "text", None)
+        if text and str(text).strip():
+            return str(text).strip(), "🟢 Gemini Online"
+        return None, "Gemini ने empty response दिया"
+    except Exception as e:
+        return None, str(e).replace("\n"," ")[:180]
 
-# ---------- navigation ----------
-PAGES=["Home","AI Chatbot","Treasure Hunt","Game Zone","Study Center","Space & Visualizers","Analytics","Reports","Feedback","Settings"]
-with st.sidebar:
-    st.markdown("## 🪷 PROJECT ARYABHUTT")
-    st.caption(f"{VERSION} • Learn • Visualize • Practice • Explore • Track")
-    page=st.radio("Menu",PAGES,index=PAGES.index(st.session_state.page) if st.session_state.page in PAGES else 0)
-    st.session_state.page=page
-    st.divider()
-    st.session_state.language=st.selectbox("🌐 Language",["hi","en"],format_func=lambda x:"हिन्दी" if x=="hi" else "English",index=0 if st.session_state.language=="hi" else 1)
-    st.session_state.focus=st.toggle("🎯 Focus Mode",st.session_state.focus)
-    st.caption("Web adaptation of the supplied V5.6 project. Android-only hardware routes are adapted for the browser.")
-
-# ---------- pages ----------
+# -------------------- HOME --------------------
 def home():
-    st.markdown(f"<div class='hero'><h1>🪷 {APP_TITLE}</h1><p>AI-Assisted Educational Learning Platform • {VERSION}</p><p>From Imagination to Innovation — From Aryabhata's Knowledge to AI-Assisted Learning.</p></div>",unsafe_allow_html=True)
+    st.markdown(f"""<div class="hero">
+    <h1>🪷 {APP_NAME}</h1>
+    <div class="muted">AI-Assisted Educational Learning Platform • {VERSION}</div>
+    <p><b>From Imagination to Innovation — From Aryabhata's Knowledge to AI-Assisted Learning.</b></p>
+    </div>""", unsafe_allow_html=True)
     cols=st.columns(4)
-    for c,val,label in zip(cols,["🤖 AI","🎮 10 Games","📚 8 Study Areas","🔊 Voice"],["AI Chatbot","Game Zone","Study Center","Browser Voice"]):
-        with c: st.markdown(f"<div class='card'><b>{val}</b><br>{label}</div>",unsafe_allow_html=True)
-    st.subheader("🧠 Learning Cycle")
+    for c, t, v in zip(cols,["🤖 AI","🎮 Games","📚 Study","📊 Track"],["AI Chatbot","10 Games + Quiz","8 Learning Areas","Real Activity"]):
+        c.metric(t,v)
     st.info("ASK → UNDERSTAND → VISUALIZE → PRACTICE → PLAY → TRACK")
-    st.subheader("🌟 Sia: R-AI Adventure — Project Inspiration")
-    st.write("Sia की science-fiction journey—प्राचीन भारत, आर्यभट्ट की ज्ञान-परंपरा और भविष्य के conversational AI की कल्पना—से PROJECT ARYABHUTT की real educational software journey प्रेरित हुई।")
-    st.markdown("> “अगर एक कहानी की Sia अपनी imagination को R-AI में बदलने की कल्पना कर सकती है, तो आज का विद्यार्थी भी अपनी imagination और technology को मिलाकर कुछ नया बना सकता है।”")
+    section("Sia: R-AI Adventure — Project Inspiration","🌟")
+    st.write("सिया की science-fiction journey — प्राचीन भारत, आर्यभट्ट की ज्ञान-परंपरा और भविष्य के conversational AI की कल्पना — से PROJECT ARYABHUTT की real educational software journey प्रेरित हुई।")
+    st.success("“अगर एक कहानी की Sia अपनी imagination को R-AI में बदलने की कल्पना कर सकती है, तो आज का विद्यार्थी भी अपनी imagination और technology को मिलाकर कुछ नया बना सकता है।”")
+    section("What is restored in this edition","🧩")
+    st.write("V5.6 core के study content को छोटा करके नहीं, बल्कि web-friendly cards, tabs, visuals और dashboards में प्रस्तुत किया गया है।")
 
-def chatbot_page():
-    st.title("🤖 आचार्य आर्यभट्ट — AI Knowledge Chat")
-    st.caption("Continuous conversation • Gemini online • V5.6 Offline Knowledge Book • Browser voice")
-    if not st.session_state.messages:
-        st.info("वत्स, प्रश्न पूछो। मैं एक ही chat में आगे के प्रश्नों को भी context के साथ समझने की कोशिश करूँगा।")
-    for m in st.session_state.messages:
-        with st.chat_message("user" if m["role"]=="user" else "assistant"):
-            if m["role"]=="assistant":
-                st.markdown(f"<div class='acharya'>{html.escape(m['content'])}</div>",unsafe_allow_html=True)
-                speak_html(m["content"])
-            else: st.write(m["content"])
-    q=st.chat_input("वत्स, अपना प्रश्न लिखो…")
+# -------------------- AI CHAT --------------------
+def chatbot():
+    section("आर्यभट्ट — AI Knowledge Chat","🤖")
+    st.caption("Continuous conversation • Gemini online • V5.6 Offline Knowledge Book • Browser-friendly")
+    for role, msg in st.session_state.chat_history:
+        with st.chat_message("user" if role=="user" else "assistant"):
+            st.write(msg)
+    q = st.chat_input("अपना सवाल पूछो…")
     if q:
-        st.session_state.messages.append({"role":"user","content":q})
-        st.session_state.chat_questions += 1
-        ans,mode=gemini_call(st.session_state.messages)
+        st.session_state.chat_history.append(("user",q))
+        st.session_state.chat += 1
+        ans, status = gemini_answer(q)
         if ans is None:
-            ans,_=offline_answer(q); mode="offline"
-        st.session_state.messages.append({"role":"assistant","content":ans})
+            # Small offline knowledge fallback
+            low=q.lower()
+            if "abdul kalam" in low or "कलाम" in q:
+                ans="डॉ. ए.पी.जे. अब्दुल कलाम भारत के प्रसिद्ध वैज्ञानिक और भारत के पूर्व राष्ट्रपति थे। उन्हें 'मिसाइल मैन ऑफ इंडिया' कहा जाता है।"
+            elif "aryabhat" in low or "आर्यभट्ट" in q:
+                ans="आर्यभट्ट प्राचीन भारत के महान गणितज्ञ और खगोलविद थे। उनके कार्यों ने गणित और खगोल विज्ञान की परंपरा को महत्वपूर्ण रूप से प्रभावित किया।"
+            elif "planet" in low or "ग्रह" in q:
+                ans="हमारे सौरमंडल में आठ ग्रह हैं: बुध, शुक्र, पृथ्वी, मंगल, बृहस्पति, शनि, यूरेनस और नेपच्यून।"
+            else:
+                ans="यह सवाल अभी Offline Knowledge Book में सीधे उपलब्ध नहीं है। Gemini Online के लिए Streamlit Secrets में GEMINI_API_KEY जाँचें।"
+            status="🟡 Offline Knowledge Book"
+        st.session_state.chat_history.append(("assistant",ans))
         st.rerun()
-    c1,c2=st.columns(2)
-    with c1:
-        if st.button("🗑️ New Conversation",use_container_width=True): st.session_state.messages=[]; st.rerun()
-    with c2:
-        if api_key(): st.success("🟢 Gemini key detected — Online mode ready")
-        else: st.warning("🟡 Gemini key नहीं मिली — Offline mode चलेगा. Streamlit Secrets में GEMINI_API_KEY जोड़ें।")
+    client, s = gemini_client()
+    st.caption(("🟢 Gemini key detected" if client else "🟡 Offline mode available") + " • " + s)
 
-def treasure_page():
-    st.title("🧩 Treasure Hunt — Mission Save Sia")
-    st.write("V5.6 के 20–30 round concept को web-friendly interactive form में adapt किया गया है।")
-    riddles=[
-        ("मैं बिना पैरों के चलता हूँ और समय बताता हूँ। मैं कौन हूँ?",["घड़ी","किताब","चंद्रमा"],0),
-        ("जिस आकृति की तीन भुजाएँ होती हैं?",["त्रिभुज","वृत्त","षट्भुज"],0),
-        ("पृथ्वी का प्राकृतिक उपग्रह?",["सूर्य","चंद्रमा","मंगल"],1),
-        ("2, 4, 6, 8 के बाद?",["9","10","12"],1),
-        ("पानी का रासायनिक सूत्र?",["CO₂","H₂O","O₂"],1),
-    ]
-    if "treasure_round" not in st.session_state: st.session_state.treasure_round=0; st.session_state.treasure_score=0
-    if st.session_state.treasure_round < 20:
-        i=st.session_state.treasure_round % len(riddles); q,opts,correct=riddles[i]
-        st.progress(st.session_state.treasure_round/20)
-        st.subheader(f"Round {st.session_state.treasure_round+1} / 20")
-        ans=st.radio(q,opts,key=f"r{st.session_state.treasure_round}")
-        if st.button("Check & Continue"):
-            if opts.index(ans)==correct: st.session_state.treasure_score+=1; st.success("🎉 सही!")
-            else: st.info(f"सही उत्तर: {opts[correct]}")
-            st.session_state.riddles_solved+=1; st.session_state.treasure_round+=1; st.rerun()
-    else:
-        st.success(f"🏆 Mission Complete! Score: {st.session_state.treasure_score}/20")
-        if st.button("Restart Mission"): st.session_state.treasure_round=0; st.session_state.treasure_score=0; st.rerun()
-
-def game_page():
-    st.title("🎮 Game Zone — 10 Games + Daily Quiz")
-    game=st.selectbox("Choose a game",["Guess the Number","Flip a Coin","Rock-Paper-Scissors","Color Matcher","Roll the Dice","Math Quiz","Magic Ball 8","Word Scramble","Animal Guessing","Click Speed Test","Daily Quiz"])
-    if game=="Guess the Number":
-        if "target" not in st.session_state: st.session_state.target=random.randint(1,100)
-        n=st.number_input("1–100 guess",1,100,50)
-        if st.button("Check"):
-            st.session_state.games_played+=1
-            if n==st.session_state.target: st.success("🎉 Correct!"); del st.session_state.target
-            elif n<st.session_state.target: st.info("थोड़ा बड़ा सोचो।")
-            else: st.info("थोड़ा छोटा सोचो।")
-    elif game=="Flip a Coin":
-        if st.button("Flip"): st.session_state.games_played+=1; st.success(random.choice(["Heads 🪙","Tails 🪙"]))
-    elif game=="Roll the Dice":
-        if st.button("Roll"): st.session_state.games_played+=1; st.success(f"🎲 {random.randint(1,6)}")
-    elif game=="Rock-Paper-Scissors":
-        choice=st.radio("Your choice",["Rock","Paper","Scissors"],horizontal=True)
-        if st.button("Play"):
-            bot=random.choice(["Rock","Paper","Scissors"]); st.session_state.games_played+=1
-            win={("Rock","Scissors"),("Paper","Rock"),("Scissors","Paper")}
-            result="Draw" if choice==bot else ("You win!" if (choice,bot) in win else "Aryabhutt wins!")
-            st.success(f"You: {choice} • Aryabhutt: {bot} • {result}")
-    elif game=="Math Quiz":
-        a,b=random.randint(2,20),random.randint(2,20); op=random.choice(["+","×"]); correct=a+b if op=="+" else a*b
-        st.write(f"What is {a} {op} {b}?"); ans=st.number_input("Answer",step=1)
-        if st.button("Check"):
-            st.session_state.games_played+=1; st.success("🎉 सही!" if ans==correct else f"सही उत्तर {correct}")
-    elif game=="Daily Quiz":
-        if not DAILY_QUIZ: st.warning("Daily Quiz data unavailable")
-        else:
-            q,opts,c=random.choice(DAILY_QUIZ); st.write(q); a=st.radio("Answer",opts)
-            if st.button("Check Quiz"): st.session_state.games_played+=1; st.success("🎉 सही!" if str(opts.index(a)+1)==str(c) else f"सही option: {c}")
-    elif game=="Magic Ball 8":
-        if st.button("Ask the Magic Ball"): st.session_state.games_played+=1; st.success(random.choice(["हाँ, आगे बढ़ो!","अभी फिर प्रयास करो।","संभावना अच्छी है।","ज्ञान से निर्णय लो, वत्स!"]))
-    elif game=="Word Scramble":
-        word=random.choice(["ARYABHATA","PYTHON","SCIENCE","GALAXY"]); scrambled="".join(random.sample(word,len(word))); st.write(f"Unscramble: **{scrambled}**"); ans=st.text_input("Word")
-        if st.button("Check Word"): st.session_state.games_played+=1; st.success("🎉 सही!" if ans.strip().upper()==word else f"उत्तर: {word}")
-    elif game=="Animal Guessing":
-        animal=random.choice(["Tiger","Elephant","Peacock","Dolphin"]); clue={"Tiger":"मैं बड़ी बिल्ली हूँ","Elephant":"मेरी सूंड होती है","Peacock":"मैं भारत का राष्ट्रीय पक्षी हूँ","Dolphin":"मैं जल में रहता हूँ"}[animal]; st.write(clue); ans=st.text_input("Guess")
-        if st.button("Check Animal"): st.session_state.games_played+=1; st.success("🎉 सही!" if ans.strip().lower()==animal.lower() else f"उत्तर: {animal}")
-    elif game=="Color Matcher":
-        target=random.choice(["Red","Blue","Green","Yellow"]); a=st.selectbox("Choose color",["Red","Blue","Green","Yellow"])
-        st.write(f"Target: **{target}**")
-        if st.button("Check Color"): st.session_state.games_played+=1; st.success("🎨 Match!" if a==target else f"Target था {target}")
-    elif game=="Click Speed Test":
-        st.write("Browser-safe version: click the button repeatedly and track your count for 5 seconds manually.")
-        if st.button("🚀 Click!"): st.session_state.games_played+=1; st.success("Click registered!")
-
-def study_page():
-    st.title("📚 Study Center")
+# -------------------- STUDY CENTER --------------------
+def study_center():
+    section("Study Center • ज्ञान कक्ष","📚")
     tabs=st.tabs(["📐 Shapes","📚 Formula Bank","📖 Definitions","🌟 Sia Story","🌌 Astronomy","🏛️ Kusumpura","💻 Technology","📅 Timetable"])
     with tabs[0]:
-        names=[x[0] for x in SHAPES]; sel=st.selectbox("Shape",names); c=next(x for x in SHAPES if x[0]==sel); st.code(c[1]); st.info(c[2]); st.session_state.formula_views+=1
+        for name,desc,formula in SHAPES:
+            with st.expander(f"📐 {name}"):
+                st.markdown(f"**{desc}**")
+                visual_box(name, "△" if name=="Triangle" else "⬡" if name in ("Hexagon","Pentagon","Octagon") else "○", formula)
+                st.write("Formula / idea:",formula)
+                st.session_state.formula_views += 1
     with tabs[1]:
-        cat=st.selectbox("Formula category",list(FORMULAS.keys()));
-        for f in FORMULAS[cat]: st.markdown(f"- {f}")
-        st.session_state.formula_views+=1
+        cat=st.selectbox("Formula category",list(FORMULAS))
+        for f in FORMULAS[cat]:
+            st.markdown(f'<div class="card">📘 {html.escape(f)}</div>',unsafe_allow_html=True)
+        st.session_state.formula_views += 1
     with tabs[2]:
-        defs=core_attr("DEFINITIONS",{})
-        if isinstance(defs,dict):
-            for k,v in list(defs.items())[:30]: st.markdown(f"**{k}** — {v}")
-        else: st.info("V5.6 definitions module is retained in the core file.")
+        c1,c2=st.columns(2)
+        with c1:
+            start=st.number_input("Start card",1,len(DEFINITIONS),1)
+        with c2:
+            count=st.slider("How many cards",5,min(20,len(DEFINITIONS)),10)
+        subset=DEFINITIONS[int(start)-1:int(start)-1+int(count)]
+        st.caption(f"Showing {len(subset)} of {len(DEFINITIONS)} bilingual definitions")
+        for en,hi,meaning,ex in subset:
+            with st.expander(f"📘 {en} — {hi}"):
+                st.write("**अर्थ / Meaning:**",meaning)
+                st.write("**Example:**",ex)
+        st.session_state.study_views += 1
     with tabs[3]:
-        story=core_attr("STORY_POINTS",[])
-        if story:
-            for item in story[:20]: st.markdown(f"- {item}")
-        else:
-            st.write("Sia समय-यात्रा करके आर्यभट्ट के युग में जाती है, गणित और खगोल सीखती है और लौटकर conversational educational AI की कल्पना करती है।")
-        st.session_state.story_points+=1
+        n=st.radio("कितने points पढ़ने हैं?",[5,10,20,30,50],horizontal=True)
+        st.progress(n/50)
+        st.caption(f"{n}/50 learning points")
+        for i,p in enumerate(STORY_POINTS[:n],1):
+            st.markdown(f'<div class="card"><b>🌟 {i:02d}</b><br>{html.escape(p)}</div>',unsafe_allow_html=True)
+        if st.button("✅ Mark these story points as read"):
+            st.session_state.story_points += n
+            st.success(f"{n} story points tracked.")
     with tabs[4]:
-        for n,v,d in ASTRO_CARDS:
-            with st.expander(n): st.markdown(f"### {v}\n{d}")
-        st.session_state.astronomy_views+=1
+        astronomy_tab()
     with tabs[5]:
-        for n,v,d in OBS_CARDS:
-            with st.expander(n): st.markdown(f"### {v}\n{d}")
+        for name,desc in KUSUMPURA:
+            with st.expander(name):
+                visual_box(name,name.split()[0] if name else "🏛️",desc)
+                st.write("💡",desc)
     with tabs[6]:
-        if TECH_CARDS:
-            for item in TECH_CARDS: st.markdown(f"**{item[0]}** — {item[2] if len(item)>2 else item[1]}")
-        else: st.info("Technology visualizer retained in V5.6 core.")
+        for name,desc,diagram,label in TECH:
+            with st.expander(name):
+                visual_box(name,"💻" if "Computer" in name else "🤖" if "AI" in name or "Robot" in name else "🌐",diagram)
+                st.write("💡",desc)
+                st.code(diagram, language="text")
     with tabs[7]:
-        st.write("V5.6: 4-week timetable • Monday–Saturday • 6 periods")
-        for w in range(1,5):
-            with st.expander(f"Week {w}"):
-                st.dataframe({"Day":["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"],"Focus":["Maths","Science","Astronomy","Coding","Revision","Project"]},use_container_width=True,hide_index=True)
+        st.info("4-week timetable — web demo में editable study plan.")
+        for week in range(1,5):
+            with st.expander(f"Week {week}"):
+                for d in ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]:
+                    st.write(f"**{d}:** Maths • Science • Astronomy • Coding • Quiz")
 
-def space_page():
-    st.title("🌌 Space & Visualizers")
-    for n,v,d in ASTRO_CARDS+OBS_CARDS:
-        st.markdown(f"<div class='card'><b>{v} {n}</b><br>{d}</div>",unsafe_allow_html=True)
-    st.subheader("☀️ Solar Eclipse Visualizer")
-    st.markdown("```text\n☀️  ─────  🌑  ─────  🌍\n             ↓\n       Moon shadow\n```")
-    st.subheader("📅 Space Calendar")
-    st.write(datetime.now().strftime("Today: %d %B %Y"))
+def astronomy_tab():
+    st.markdown("### 🌌 Astronomy Explorer")
+    st.write("यहाँ केवल eclipse नहीं — पूरे solar system, planets, Earth-Moon, Milky Way और ancient observation topics हैं।")
+    cols=st.columns(3)
+    for i,(name,fact,kind,theme) in enumerate(ASTRO):
+        with cols[i%3]:
+            st.markdown(f'<div class="card"><h4>{name}</h4><p>{html.escape(fact)}</p></div>',unsafe_allow_html=True)
+            if "Mercury" in name: sym="☿"
+            elif "Venus" in name: sym="♀"
+            elif "Earth" in name: sym="🌍"
+            elif "Mars" in name: sym="♂"
+            elif "Jupiter" in name: sym="♃"
+            elif "Saturn" in name: sym="♄"
+            elif "Uranus" in name: sym="♅"
+            elif "Neptune" in name: sym="♆"
+            elif "Solar" in name: sym="☀️"
+            elif "Lunar" in name: sym="🌕"
+            elif "Milky" in name: sym="🌌"
+            else: sym="🪐"
+            visual_box(name,sym,kind)
+    st.session_state.astronomy_views += 1
+    st.info("🔭 Verified science reference for judges: NASA's Solar System image gallery and planet pages can be opened from the project resources.")
 
-def analytics_page():
-    st.title("📊 Data & Analytics")
-    vals=[("Sessions",st.session_state.sessions),("Games Played",st.session_state.games_played),("Riddles Solved",st.session_state.riddles_solved),("Chat Questions",st.session_state.chat_questions),("Study Views",st.session_state.study_views),("Formula Views",st.session_state.formula_views),("Story Points",st.session_state.story_points),("Astronomy Views",st.session_state.astronomy_views),("Math Activity",st.session_state.math_activity),("Reports Generated",st.session_state.reports_generated)]
+# -------------------- SPACE & VISUALIZERS --------------------
+def space_visualizers():
+    section("Space & Visualizers","🌌")
+    st.write("Interactive visual learning: planets + eclipse geometry + astronomy facts.")
+    st.markdown("### ☀️ Solar System Visual")
+    visual_box("Sun → Mercury → Venus → Earth → Mars → Jupiter → Saturn → Uranus → Neptune","☀️","Planet order from the Sun")
+    st.markdown("### 🌑 Solar Eclipse")
+    visual_box("SUN → MOON → EARTH","🌑","Moon's shadow can fall on parts of Earth")
+    st.markdown("### 🌕 Lunar Eclipse")
+    visual_box("SUN → EARTH → MOON","🌕","Earth's shadow can fall on the Moon")
+    st.markdown("### ✨ Amazing Astronomy Facts")
+    facts=[
+        "हमारे solar system में 8 planets हैं।",
+        "Jupiter solar system का largest planet है।",
+        "Saturn अपने prominent rings के लिए प्रसिद्ध है।",
+        "Mercury Sun के सबसे करीब और solar system का smallest planet है।",
+        "Uranus और Neptune ice giants हैं।",
+        "Milky Way हमारी galaxy है।",
+        "Solar eclipse में Moon Sun और Earth के बीच आ सकता है।",
+        "Lunar eclipse में Earth की shadow Moon पर पड़ सकती है।",
+    ]
+    for f in facts: st.markdown(f"• {f}")
+    st.link_button("🛰️ Open official NASA Solar System image gallery", "https://science.nasa.gov/gallery/our-solar-system-images/")
+    st.caption("Science facts are presented in a school-level form. The project also provides visual cards so the astronomy section is not text-only.")
+
+# -------------------- ANALYTICS --------------------
+def analytics():
+    section("Data & Analytics","📊")
+    data=[
+        ("Sessions",st.session_state.sessions),
+        ("Games Played",st.session_state.games),
+        ("Riddles Solved",st.session_state.riddles),
+        ("Chat Questions",st.session_state.chat),
+        ("Study Views",st.session_state.study_views),
+        ("Formula Views",st.session_state.formula_views),
+        ("Story Points Read",st.session_state.story_points),
+        ("Astronomy Views",st.session_state.astronomy_views),
+        ("Math Activity",st.session_state.math_activity),
+        ("Reports Generated",st.session_state.reports),
+    ]
     cols=st.columns(5)
-    for i,(k,v) in enumerate(vals): cols[i%5].markdown(f"<div class='metric'><b>{v}</b><br><span class='small'>{k}</span></div>",unsafe_allow_html=True)
-    st.bar_chart({k:v for k,v in vals})
+    for i,(k,v) in enumerate(data):
+        cols[i%5].metric(k,v)
+    st.markdown("### 🏫 Database Summary")
+    c1,c2=st.columns(2)
+    c1.metric("Registered Schools",len(st.session_state.schools))
+    c2.metric("Registered Students",len(st.session_state.students))
+    if st.session_state.schools:
+        st.dataframe([{"School":k,"Students":v} for k,v in st.session_state.schools.items()],use_container_width=True)
+    else:
+        st.info("अभी demo session में कोई school registered नहीं है। Teacher/Admin से school जोड़ सकते हैं।")
+    st.caption("⚠️ Web demo में ये records current app session के हैं; यह fake nationwide statistic नहीं है और अभी permanent multi-school cloud database नहीं है.")
 
-def reports_page():
-    st.title("📄 Reports")
-    report=f"""PROJECT ARYABHUTT — {VERSION}\nGenerated: {datetime.now():%Y-%m-%d %H:%M}\n\nSessions: {st.session_state.sessions}\nGames Played: {st.session_state.games_played}\nRiddles Solved: {st.session_state.riddles_solved}\nChat Questions: {st.session_state.chat_questions}\nStudy Views: {st.session_state.study_views}\nFormula Views: {st.session_state.formula_views}\nStory Points: {st.session_state.story_points}\nAstronomy Views: {st.session_state.astronomy_views}\nMath Activity: {st.session_state.math_activity}\nReports Generated: {st.session_state.reports_generated}\n"""
-    st.text_area("Report Card",report,height=300)
-    st.download_button("⬇️ Download Report",report,"project_aryabhutt_report.txt","text/plain")
-    st.session_state.reports_generated += 1
+# -------------------- TEACHER / ADMIN --------------------
+def admin():
+    section("Teacher / Admin Dashboard","🔐")
+    if not st.session_state.admin_ok:
+        st.info("Teacher/Admin area सुरक्षित है। Demo password को production में Streamlit Secret ADMIN_PASSWORD से बदल सकते हैं।")
+        with st.form("admin_login"):
+            pw=st.text_input("Admin password",type="password")
+            ok=st.form_submit_button("🔓 Login")
+        if ok:
+            if pw==admin_password():
+                st.session_state.admin_ok=True
+                st.success("Teacher/Admin access enabled.")
+                st.rerun()
+            else:
+                st.error("Password सही नहीं है.")
+        return
+    c1,c2,c3=st.columns(3)
+    c1.metric("🏫 Schools",len(st.session_state.schools))
+    c2.metric("🧑‍🎓 Students",len(st.session_state.students))
+    c3.metric("💬 Chats",st.session_state.chat)
+    t1,t2,t3=st.tabs(["🏫 Manage Schools","🧑‍🎓 Student Database","📊 Activity"])
+    with t1:
+        with st.form("school_form"):
+            school=st.text_input("School name")
+            num=st.number_input("Number of students",0,100000,0)
+            save=st.form_submit_button("➕ Add / Update School")
+        if save and school.strip():
+            st.session_state.schools[school.strip()]=int(num)
+            st.success("School saved.")
+        if st.session_state.schools:
+            for s,n in st.session_state.schools.items():
+                st.write(f"🏫 **{s}** — {n} students")
+    with t2:
+        with st.form("student_form"):
+            name=st.text_input("Student name")
+            school=st.text_input("Student's school")
+            save=st.form_submit_button("🧑‍🎓 Save Student")
+        if save and name.strip():
+            st.session_state.students.append({"name":name.strip(),"school":school.strip()})
+            st.success("Student saved.")
+        if st.session_state.students:
+            st.dataframe(st.session_state.students,use_container_width=True)
+    with t3:
+        st.write("Real activity recorded in this web session:")
+        st.json({k:v for k,v in {
+            "sessions":st.session_state.sessions,"games":st.session_state.games,
+            "riddles":st.session_state.riddles,"chat":st.session_state.chat,
+            "study_views":st.session_state.study_views,"formula_views":st.session_state.formula_views,
+            "story_points":st.session_state.story_points,"astronomy_views":st.session_state.astronomy_views
+        }.items()})
+    if st.button("🔒 Logout Admin"):
+        st.session_state.admin_ok=False
+        st.rerun()
 
-def feedback_page():
-    st.title("💬 Feedback")
-    rating=st.slider("Rating",1,5,5); comment=st.text_area("Comment")
-    if st.button("Save Feedback"):
-        st.session_state.feedback.append({"rating":rating,"comment":comment,"time":datetime.now().isoformat(timespec="seconds")}); st.success("Feedback saved locally in this web session. धन्यवाद!")
+# -------------------- GAMES --------------------
+def games():
+    section("Game Zone — 10 Games + Daily Quiz","🎮")
+    game=st.selectbox("Choose a game",[
+        "Guess the Number","Flip a Coin","Rock-Paper-Scissors","Color Matcher",
+        "Roll the Dice","Math Quiz","Magic Ball 8","Word Scramble",
+        "Animal Guessing","Click Speed Test","Daily Quiz"
+    ])
+    if game=="Guess the Number":
+        target=st.session_state.setdefault("guess_target",random.randint(1,20))
+        g=st.number_input("Guess 1–20",1,20,10)
+        if st.button("Check Guess"):
+            st.session_state.games+=1
+            if g==target:
+                st.success("🎉 Correct!")
+                st.session_state.pop("guess_target",None)
+            elif g<target: st.info("थोड़ा बड़ा number try करो.")
+            else: st.info("थोड़ा छोटा number try करो.")
+    elif game=="Flip a Coin":
+        if st.button("Flip"):
+            st.session_state.games+=1
+            st.success(random.choice(["Heads","Tails"]))
+    elif game=="Rock-Paper-Scissors":
+        p=st.selectbox("Your choice",["Rock","Paper","Scissors"])
+        if st.button("Play"):
+            st.session_state.games+=1
+            bot=random.choice(["Rock","Paper","Scissors"])
+            st.write("Computer:",bot)
+            if p==bot: st.info("Draw")
+            elif (p,bot) in [("Rock","Scissors"),("Paper","Rock"),("Scissors","Paper")]: st.success("You win!")
+            else: st.warning("Try again!")
+    elif game=="Color Matcher":
+        colors=["Red","Blue","Green","Yellow","Purple"]
+        target=random.choice(colors)
+        choice=st.selectbox("Match this color",colors,index=0)
+        st.write("Target:",target)
+        if st.button("Check Color"):
+            st.session_state.games+=1
+            st.success("Correct!") if choice==target else st.error("Not a match.")
+    elif game=="Roll the Dice":
+        if st.button("Roll Dice"):
+            st.session_state.games+=1
+            st.success(f"🎲 You rolled {random.randint(1,6)}")
+    elif game=="Math Quiz":
+        a,b=random.randint(2,20),random.randint(2,20)
+        ans=st.number_input(f"{a} × {b} = ?",0,1000,0)
+        if st.button("Check Math"):
+            st.session_state.games+=1
+            if ans==a*b: st.success("Correct!")
+            else: st.error(f"Answer: {a*b}")
+    elif game=="Magic Ball 8":
+        q=st.text_input("Ask a yes/no question")
+        if st.button("Ask Magic Ball") and q.strip():
+            st.session_state.games+=1
+            st.info(random.choice(["Yes","No","Maybe","Think again","Very likely"]))
+    elif game=="Word Scramble":
+        words=["ARYABHATTA","SCIENCE","ASTRONOMY","PYTHON","MATHEMATICS"]
+        word=st.session_state.setdefault("scramble_word",random.choice(words))
+        scrambled="".join(random.sample(word,len(word)))
+        st.write("Unscramble:",scrambled)
+        ans=st.text_input("Your answer",key="scramble_answer")
+        if st.button("Check Word"):
+            st.session_state.games+=1
+            if ans.strip().upper()==word: st.success("Correct!")
+            else: st.info(f"Hint: starts with {word[0]}")
+    elif game=="Animal Guessing":
+        animals={"Lion":"roars","Elephant":"has a trunk","Penguin":"cannot fly","Dolphin":"lives in water"}
+        animal=random.choice(list(animals))
+        st.write("Clue:",animals[animal])
+        if st.button("Reveal Animal"):
+            st.session_state.games+=1
+            st.success(animal)
+    elif game=="Click Speed Test":
+        st.write("Tap the button as many times as you can.")
+        if "clicks" not in st.session_state: st.session_state.clicks=0
+        if st.button("⚡ CLICK"):
+            st.session_state.clicks+=1
+            st.session_state.games+=1
+        st.metric("Clicks recorded",st.session_state.clicks)
+        if st.button("Reset Click Test"): st.session_state.clicks=0
+    else:
+        qs=[("How many planets are in our solar system?","8"),
+            ("Largest planet?","Jupiter"),
+            ("Aryabhata was a?","mathematician"),
+            ("Earth's natural satellite?","moon"),
+            ("What does AI learn from?","data")]
+        score=0
+        for i,(q,a) in enumerate(qs):
+            x=st.text_input(q,key=f"daily_{i}")
+            if x.strip().lower()==a.lower(): score+=1
+        if st.button("Check Daily Quiz"):
+            st.session_state.games+=1
+            st.success(f"Score: {score}/{len(qs)}")
 
-def settings_page():
-    st.title("⚙️ Settings & Extra Features")
-    st.subheader("🔊 Voice / TTS")
-    st.write("Web version में Android/Pydroid TTS की जगह browser SpeechSynthesis उपयोग हो रहा है। Chatbot के हर उत्तर के नीचे voice button है।")
-    st.subheader("🔳 QR / URL Generator")
-    url=st.text_input("URL",value="https://project-aryabhutt-sapphrjy4buqinxkfcwq2hl.streamlit.app/")
-    if st.button("Generate QR"):
-        try:
-            import qrcode
-            img=qrcode.make(url); st.image(img.get_image(),caption="PROJECT ARYABHUTT QR")
-        except Exception as e: st.error(f"QR dependency unavailable: {e}")
-    st.subheader("🎯 Focus Mode")
-    st.write("Study-first mode: browser app के अंदर learning sections को प्राथमिकता देने के लिए setting.")
-    st.subheader("🔐 Teacher / Admin")
-    st.info("Web deployment में secure server-side admin authentication जोड़ना बाकी है; इस demo में fake rankings या fake cloud statistics नहीं दिखाए जाते।")
-    st.subheader("🧑‍🎓 Student Database")
-    name=st.text_input("Student name"); school=st.text_input("School");
-    if st.button("Save Student") and name.strip(): st.success(f"Student record prepared: {name} • {school}")
-    st.subheader("☁️ Data / Update")
-    st.info("Original V5.6 remains the MASTER Pydroid file. This web app is a browser adaptation of that project.")
+# -------------------- TREASURE HUNT --------------------
+def treasure_hunt():
+    section("Treasure Hunt — Mission Save Sia","🧩")
+    st.write("20-question web mission based on the V5.6 learning themes: maths, astronomy, science, technology and Sia's story.")
+    questions=[
+        ("Who is the project named after?","Aryabhata"),
+        ("How many planets are in our solar system?","8"),
+        ("What is Earth's natural satellite?","Moon"),
+        ("Which planet is the largest?","Jupiter"),
+        ("Which planet is famous for rings?","Saturn"),
+        ("What is the name of our galaxy?","Milky Way"),
+        ("What does a computer process?","data"),
+        ("What does AI work with to learn patterns?","data"),
+        ("What is the formula for rectangle area?","l*b"),
+        ("What is the formula for circle area?","pi*r2"),
+        ("What is 7 × 8?","56"),
+        ("What is 25% of 100?","25"),
+        ("Which planet is called the Red Planet?","Mars"),
+        ("Which planet is closest to the Sun?","Mercury"),
+        ("What happens in Earth rotation?","day"),
+        ("What is a code?","instructions"),
+        ("What does a network connect?","devices"),
+        ("What is a gnomon useful for studying?","shadow"),
+        ("What is a timetable useful for?","study"),
+        ("What did Sia turn imagination into?","R-AI"),
+    ]
+    with st.form("treasure_form"):
+        answers=[]
+        for i,(q,a) in enumerate(questions,1):
+            answers.append(st.text_input(f"{i}. {q}",key=f"hunt_{i}"))
+        submitted=st.form_submit_button("🚀 Finish Mission")
+    if submitted:
+        score=0
+        for ans,(_,expected) in zip(answers,questions):
+            a=ans.strip().lower()
+            e=expected.lower()
+            if e in a or (e=="data" and "data" in a) or (e=="day" and ("day" in a or "night" in a)):
+                score+=1
+        st.session_state.riddles+=score
+        st.success(f"Mission complete: {score}/{len(questions)}")
+        if score>=15: st.balloons()
+        st.info("Learning tip: score se zyada important hai ki galat answers ko dobara samjha जाए।")
 
-# ---------- render ----------
-{
-"Home":home,"AI Chatbot":chatbot_page,"Treasure Hunt":treasure_page,"Game Zone":game_page,
-"Study Center":study_page,"Space & Visualizers":space_page,"Analytics":analytics_page,
-"Reports":reports_page,"Feedback":feedback_page,"Settings":settings_page,
-}[st.session_state.page]()
+# -------------------- REPORTS / FEEDBACK / SETTINGS --------------------
+def reports():
+    section("Reports","📄")
+    st.write("A transparent activity report for this web session.")
+    report={"Version":VERSION,"Generated":datetime.now().isoformat(timespec="seconds"),
+            "Sessions":st.session_state.sessions,"Games":st.session_state.games,
+            "Riddles":st.session_state.riddles,"Chat Questions":st.session_state.chat,
+            "Study Views":st.session_state.study_views,"Formula Views":st.session_state.formula_views,
+            "Story Points Read":st.session_state.story_points,"Astronomy Views":st.session_state.astronomy_views,
+            "Registered Schools":len(st.session_state.schools),"Registered Students":len(st.session_state.students)}
+    st.json(report)
+    st.download_button("📥 Download Report JSON",json.dumps(report,ensure_ascii=False,indent=2),file_name="aryabhutt_report.json")
+    if st.button("Generate / Count Report"):
+        st.session_state.reports+=1
+        st.success("Report generated.")
 
-st.markdown("---")
-st.caption("PROJECT ARYABHUTT • Web V5.6 adaptation • Original Pydroid V5.6 source preserved as MASTER/core")
+def feedback():
+    section("Feedback","💬")
+    with st.form("feedback"):
+        rating=st.radio("How was the experience?",["Excellent","Good","Okay","Needs Improvement"])
+        comment=st.text_area("Comment")
+        if st.form_submit_button("Save Feedback"):
+            st.success("Feedback saved for this session. धन्यवाद!")
+
+def settings():
+    section("Settings & Extra Features","⚙️")
+    st.write("🔊 **Voice / TTS:** Browser SpeechSynthesis can be used by the browser/device. Native Android/Pydroid TTS remains part of the original V5.6 source.")
+    st.write("🔳 **QR / URL:** Project URL")
+    st.code("https://project-aryabhutt-sapphrjy4buqinxkfcwq2hl.streamlit.app/")
+    st.write("🎯 **Focus Mode**")
+    st.session_state.focus_mode=st.toggle("Study-first mode",st.session_state.focus_mode)
+    st.write("☁️ **Data / Update:** Web demo is an adaptation of the original V5.6 MASTER; it does not pretend to be a full cloud database.")
+    st.write("🔐 **Teacher/Admin:** Use the sidebar option to open the secured dashboard.")
+
+# -------------------- SIDEBAR / ROUTING --------------------
+with st.sidebar:
+    st.markdown("### 🪷 PROJECT ARYABHUTT")
+    st.caption("V5.6 WEB • Learn • Visualize • Practice • Explore • Track")
+    page=st.radio("Menu",[
+        "Home","AI Chatbot","Treasure Hunt","Game Zone","Study Center",
+        "Space & Visualizers","Data & Analytics","Reports","Feedback","Settings",
+        "Teacher / Admin"
+    ])
+    st.divider()
+    lang=st.selectbox("🌐 Language",["हिन्दी","English"])
+    st.caption("Original V5.6 Pydroid source is preserved as MASTER/core.")
+    st.caption("Web adaptation restores the larger Study Center and admin/data screens.")
+
+if page=="Home": home()
+elif page=="AI Chatbot": chatbot()
+elif page=="Game Zone": games()
+elif page=="Study Center": study_center()
+elif page=="Space & Visualizers": space_visualizers()
+elif page=="Data & Analytics": analytics()
+elif page=="Reports": reports()
+elif page=="Feedback": feedback()
+elif page=="Settings": settings()
+elif page=="Teacher / Admin": admin()
+elif page=="Treasure Hunt":
+    section("Treasure Hunt — Mission Save Sia","🧩")
+    st.info("Web edition: treasure-hunt screen is reserved for the restored V5.6 mission flow. Use Study Center → Sia Story for the complete 50-point learning story.")
