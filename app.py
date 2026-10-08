@@ -3,6 +3,7 @@ import os, json, math, random, html
 from datetime import datetime, date
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 # Optional Gemini
 try:
@@ -281,23 +282,68 @@ def gemini_client():
         return None, str(e)[:120]
 
 def gemini_answer(prompt):
+    """Hindi-first Aryabhatt persona with short conversational memory."""
     client, status = gemini_client()
     if client is None:
         return None, status
+
+    history = st.session_state.get("chat_history", [])[-8:]
+    context_lines = []
+    for role, msg in history:
+        label = "विद्यार्थी" if role == "user" else "आर्यभट्ट"
+        context_lines.append(f"{label}: {msg}")
+    conversation = "\n".join(context_lines)
+
+    system_prompt = (
+        "आप आचार्य आर्यभट्ट के नाम से बने PROJECT ARYABHUTT के ज्ञान-सहायक हैं।\n"
+        "विद्यार्थी से सम्मानजनक, सहज, आत्मीय और समझदार तरीके से बात करें। "
+        "बच्चों जैसी बनावटी भाषा, अत्यधिक इमोजी, 'young learner', 'kid' या baby-talk का प्रयोग न करें।\n"
+        "मुख्य उत्तर हमेशा सरल और स्वाभाविक हिंदी (देवनागरी) में दें। "
+        "विद्यार्थी प्रश्न English में पूछे तब भी उत्तर हिंदी में दें, जब तक वह स्पष्ट रूप से English answer न मांगे।\n"
+        "जरूरी scientific/proper terms को English में रख सकते हैं और उनका अर्थ हिंदी में समझाएँ।\n"
+        "उत्तर तथ्यात्मक, संक्षिप्त लेकिन पर्याप्त हों। इतिहास के तथ्य न गढ़ें।\n"
+        "आर्यभट्ट की तरह जिज्ञासा, तर्क, गणित और वैज्ञानिक सोच को प्रोत्साहित करें; लेकिन स्वयं को वास्तविक ऐतिहासिक आर्यभट्ट न बताएं।\n\n"
+        "पिछली बातचीत का संदर्भ:\n" + (conversation or "कोई पिछली बातचीत नहीं") + "\n\n"
+        "नया प्रश्न: " + str(prompt)
+    )
     try:
-        r = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=f"""You are Acharya Aryabhatta, a friendly Class 8 educational assistant.
-Answer in simple Hindi/Hinglish unless the student asks in English.
-Be accurate, child-friendly and concise. Never invent historical facts.
-Student question: {prompt}"""
-        )
+        r = client.models.generate_content(model=GEMINI_MODEL, contents=system_prompt)
         text = getattr(r, "text", None)
         if text and str(text).strip():
             return str(text).strip(), "🟢 Gemini Online"
-        return None, "Gemini ने empty response दिया"
+        return None, "Gemini ने उत्तर नहीं दिया"
     except Exception as e:
-        return None, str(e).replace("\n"," ")[:180]
+        return None, str(e).replace("\n", " ")[:180]
+
+def browser_voice(text, key):
+    """Render a browser Hindi voice button for the supplied answer."""
+    safe = json.dumps(str(text), ensure_ascii=False)
+    components.html(f"""
+    <div style="font-family:system-ui;margin:4px 0 10px;">
+      <button id="speak-{key}" style="padding:8px 14px;border-radius:10px;border:1px solid #888;background:#fff;cursor:pointer;font-size:15px;">🔊 उत्तर सुनें</button>
+      <span id="voice-status-{key}" style="margin-left:8px;font-size:13px;color:#666;"></span>
+    </div>
+    <script>
+      const btn = document.getElementById("speak-{key}");
+      const status = document.getElementById("voice-status-{key}");
+      const text = {safe};
+      btn.onclick = () => {{
+        if (!('speechSynthesis' in window)) {{
+          status.textContent = 'इस browser में voice उपलब्ध नहीं है।';
+          return;
+        }}
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'hi-IN';
+        u.rate = 0.92;
+        u.pitch = 1.0;
+        u.onstart = () => status.textContent = '🔊 सुनाया जा रहा है…';
+        u.onend = () => status.textContent = '✓ पूरा हुआ';
+        u.onerror = () => status.textContent = 'Voice शुरू नहीं हो सकी।';
+        window.speechSynthesis.speak(u);
+      }};
+    </script>
+    """, height=52)
 
 # -------------------- HOME --------------------
 def home():
@@ -319,10 +365,12 @@ def home():
 # -------------------- AI CHAT --------------------
 def chatbot():
     section("आर्यभट्ट — AI Knowledge Chat","🤖")
-    st.caption("Continuous conversation • Gemini online • V5.6 Offline Knowledge Book • Browser-friendly")
-    for role, msg in st.session_state.chat_history:
+    st.caption("Continuous conversation • Gemini Online • V5.6 Offline Knowledge Book • Hindi-first • Browser Voice")
+    for idx, (role, msg) in enumerate(st.session_state.chat_history):
         with st.chat_message("user" if role=="user" else "assistant"):
             st.write(msg)
+            if role == "assistant":
+                browser_voice(msg, f"chat-{idx}")
     q = st.chat_input("अपना सवाल पूछो…")
     if q:
         st.session_state.chat_history.append(("user",q))
@@ -343,7 +391,7 @@ def chatbot():
         st.session_state.chat_history.append(("assistant",ans))
         st.rerun()
     client, s = gemini_client()
-    st.caption(("🟢 Gemini key detected" if client else "🟡 Offline mode available") + " • " + s)
+    st.caption(("🟢 Gemini Online तैयार" if client else "🟡 Offline Knowledge Book उपलब्ध") + " • " + ("हिंदी-first • Browser Voice" if client else s))
 
 # -------------------- STUDY CENTER --------------------
 def study_center():
@@ -728,6 +776,4 @@ elif page=="Reports": reports()
 elif page=="Feedback": feedback()
 elif page=="Settings": settings()
 elif page=="Teacher / Admin": admin()
-elif page=="Treasure Hunt":
-    section("Treasure Hunt — Mission Save Sia","🧩")
-    st.info("Web edition: treasure-hunt screen is reserved for the restored V5.6 mission flow. Use Study Center → Sia Story for the complete 50-point learning story.")
+elif page=="Treasure Hunt": treasure_hunt()
