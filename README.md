@@ -1,14 +1,20 @@
 # PROJECT ARYABHUTT — V5.6 WEB
 
-This is the browser adaptation of the supplied `PROJECT_ARYABHUTT_V5.6_FINAL_COMPLETE_GEMINI_VOICE_FIXED-1.py`.
+AI-Assisted Educational Learning Platform
 
-Files:
-- `app.py` — Streamlit web interface
-- `aryabhutt_v56_core.py` — supplied V5.6 source preserved as the web adaptation core/data source
-- `requirements.txt` — web dependencies
+This web version is a browser adaptation of the original PROJECT ARYABHUTT V5.6 Python/Pydroid project.
+
+## Files
+- `app.py` — Streamlit web application
+- `aryabhutt_v56_core.py` — original V5.6 project source preserved as the core/master reference
+- `requirements.txt` — Streamlit and web dependencies
+- `README.md` — project information
 
 ## Gemini
-Add a Streamlit secret named `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). Never put the key in GitHub/source code.
+Add a Streamlit secret named `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). Never put the API key in GitHub/source code.
 
 ## Voice
-The browser version uses the browser's SpeechSynthesis API for answer playback. Android/Pydroid-specific TTS routes remain in the original V5.6 source and are not claimed as browser routes.
+The browser adaptation uses browser SpeechSynthesis where supported. Android/Pydroid-specific voice routes remain in the original V5.6 source.
+
+## Important
+The original V5.6 Python project is preserved separately as the MASTER/core source. The web version is an adaptation for browser access.
