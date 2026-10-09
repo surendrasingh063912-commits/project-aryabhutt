@@ -1,5 +1,5 @@
 
-import os, json, math, random, html
+import os, json, math, random, html, time
 from datetime import datetime, date
 
 import streamlit as st
@@ -310,14 +310,25 @@ def gemini_answer(prompt):
         "पिछली बातचीत का संदर्भ:\\n" + (conversation or "कोई पिछली बातचीत नहीं") + "\\n\\n"
         "नया प्रश्न: " + str(prompt)
     )
-    try:
-        r = client.models.generate_content(model=GEMINI_MODEL, contents=system_prompt)
-        text = getattr(r, "text", None)
-        if text and str(text).strip():
-            return str(text).strip(), "🟢 Gemini Online"
-        return None, "Gemini ने उत्तर नहीं दिया"
-    except Exception as e:
-        return None, str(e).replace("\n", " ")[:180]
+    last_error = None
+    for attempt in range(2):
+        try:
+            r = client.models.generate_content(model=GEMINI_MODEL, contents=system_prompt)
+            answer = getattr(r, "text", None)
+            if answer and str(answer).strip():
+                answer = str(answer).strip()
+                # Light-touch persona polish if the model forgets the Aryabhatt voice.
+                if not any(x in answer for x in ("आर्यभट्ट", "ज्ञान की ज्योति", "आयुष्मान भव", "वत्स", "प्रिय विद्यार्थी")):
+                    answer += "\n\n🌼 ज्ञान की ज्योति जलाए रखो। आयुष्मान भवः!\nअब बताओ, अगला कौन-सा प्रश्न तुम्हारी जिज्ञासा जगा रहा है?"
+                return answer, "🟢 Gemini Online"
+            return None, "Gemini ने खाली उत्तर दिया"
+        except Exception as e:
+            last_error = str(e).replace("\n", " ")[:180]
+            if attempt == 0 and ("503" in last_error or "UNAVAILABLE" in last_error or "high demand" in last_error.lower()):
+                time.sleep(1.2)
+                continue
+            break
+    return None, (last_error or "Gemini सेवा अभी उपलब्ध नहीं है")
 
 def browser_voice(text, key):
     """Render a browser Hindi voice button for the supplied answer."""
@@ -442,11 +453,25 @@ OFFLINE_KB = [
 def offline_answer(question):
     """Return a locally stored answer or None; never requires network access."""
     q = str(question).lower().strip()
-    # Basic arithmetic parser: allow only digits, spaces, decimal points and arithmetic operators.
+    # Common school prompts should work offline even when Gemini is busy.
+    if any(x in q for x in ("bharat per 5 points", "भारत पर 5 बिंदु", "भारत पर पांच बिंदु", "भारत के बारे में 5", "5 points on india", "5 points on bharat", "भारत पर पाँच बिंदु")):
+        return ("वत्स, भारत के विषय में पाँच प्रमुख बिंदु प्रस्तुत हैं:\n"
+                "1. भारत दक्षिण एशिया में स्थित एक देश है।\n"
+                "2. भारत की राजधानी नई दिल्ली है।\n"
+                "3. भारत एक लोकतांत्रिक गणराज्य है और इसका संविधान देश के शासन का आधार है।\n"
+                "4. भारत में अनेक भाषाएँ, परंपराएँ, त्योहार और सांस्कृतिक विरासतें हैं।\n"
+                "5. भारत की अर्थव्यवस्था में कृषि, उद्योग, सेवाएँ, विज्ञान और तकनीक महत्वपूर्ण भूमिका निभाते हैं।\n\n"
+                "🌼 ज्ञान की ज्योति जलाए रखो। आयुष्मान भवः!\nअब बताओ, भारत के इतिहास पर पाँच बिंदु चाहोगे या भूगोल पर? ")
+    # Basic arithmetic parser: allow digits, spaces, decimal points and arithmetic operators.
     import re, ast, operator
-    if re.fullmatch(r'[\d\s.+*/()%\-]+', q) and any(ch.isdigit() for ch in q):
+    expr = q
+    if not re.fullmatch(r'[\d\s.+*/()%\-]+', expr):
+        match = re.search(r'(?<![\w.])\d+(?:\.\d+)?(?:\s*[+*/%\-]\s*\d+(?:\.\d+)?|\s*\*\*\s*\d+)+(?:\s*[+*/%\-]\s*\d+(?:\.\d+)?)*', q)
+        if match:
+            expr = match.group(0)
+    if re.fullmatch(r'[\d\s.+*/()%\-]+', expr) and any(ch.isdigit() for ch in expr):
         try:
-            node = ast.parse(q, mode='eval')
+            node = ast.parse(expr, mode='eval')
             ops = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv, ast.Pow: operator.pow, ast.Mod: operator.mod, ast.USub: operator.neg, ast.UAdd: operator.pos}
             def calc(n):
                 if isinstance(n, ast.Expression): return calc(n.body)
@@ -485,15 +510,19 @@ def chatbot():
             ans = offline_answer(q)
             if ans is None:
                 detail = str(status).replace("\n", " ").strip()[:160]
-                ans = ("यह प्रश्न अभी स्थानीय ऑफलाइन ज्ञान-संग्रह में नहीं मिला। इंटरनेट/Gemini उपलब्ध होने पर फिर पूछें, "
-                       "या प्रश्न को किसी स्पष्ट शब्द/विषय के साथ लिखें।\n\n"
-                       "तकनीकी स्थिति: " + (detail or "ऑफलाइन मोड सक्रिय") + "\n\n"
-                       "नोट: ऑफलाइन संग्रह में चुने हुए विषयों के उत्तर हैं; यह दुनिया के हर प्रश्न का संपूर्ण विश्वकोश नहीं है।")
+                if "503" in detail or "UNAVAILABLE" in detail or "high demand" in detail.lower():
+                    ans = ("वत्स, इस समय Gemini ज्ञान-सेवा पर बहुत अधिक अनुरोध हैं, इसलिए उत्तर अभी प्राप्त नहीं हो पाया। "
+                           "मैंने दोबारा प्रयास किया, पर सेवा उपलब्ध नहीं हुई। प्रश्न को थोड़ी देर बाद फिर भेजना।\n\n"
+                           "🌼 ज्ञान की ज्योति जलाए रखो। आयुष्मान भवः!\nतब तक चाहो तो प्रश्न को छोटे हिस्सों में लिखो या ऑफलाइन ज्ञान-संग्रह में उपलब्ध विषय पूछो।")
+                else:
+                    ans = ("वत्स, यह प्रश्न अभी मेरे स्थानीय ऑफलाइन ज्ञान-संग्रह में नहीं मिला। "
+                           "Gemini/इंटरनेट उपलब्ध होने पर इसे फिर पूछना, या प्रश्न को स्पष्ट विषय और छोटे वाक्य में लिखना।\n\n"
+                           "🌼 ज्ञान की ज्योति जलाए रखो। आयुष्मान भवः!\nध्यान रहे: ऑफलाइन संग्रह में चुने हुए विषयों के उत्तर हैं, दुनिया के हर प्रश्न का पूरा विश्वकोश नहीं।")
             status = "🟡 Offline Knowledge Book"
         st.session_state.chat_history.append(("assistant",ans))
         st.rerun()
     client, s = gemini_client()
-    st.caption(("🟢 Gemini Online तैयार" if client else "🟡 Offline Knowledge Book उपलब्ध") + " • " + ("हिंदी-first • Browser Voice" if client else s))
+    st.caption(("🔵 Gemini क्लाइंट कॉन्फ़िगर है — वास्तविक कनेक्शन प्रश्न भेजने पर जाँचा जाएगा" if client else "🟡 Offline Knowledge Book उपलब्ध") + " • " + ("हिंदी-first • Browser Voice" if client else s))
 
 # -------------------- STUDY CENTER --------------------
 def study_center():
