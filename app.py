@@ -13,7 +13,7 @@ except Exception:
 
 APP_NAME = "PROJECT ARYABHUTT"
 VERSION = "V5.6 WEB • RESTORED STUDY EDITION"
-GEMINI_MODEL = "gemini-3.8-flash"
+GEMINI_MODEL = "gemini-2.5-flash"  # Stable Gemini API model
 
 st.set_page_config(page_title=APP_NAME, page_icon="🪷", layout="wide")
 
@@ -390,8 +390,11 @@ def chatbot():
             elif "planet" in low or "ग्रह" in q:
                 ans="हमारे सौरमंडल में आठ ग्रह हैं: बुध, शुक्र, पृथ्वी, मंगल, बृहस्पति, शनि, यूरेनस और नेपच्यून।"
             else:
-                ans=("इस समय Gemini से उत्तर प्राप्त नहीं हो सका। कृपया थोड़ी देर बाद यही प्रश्न फिर पूछें। "
-                     "यदि समस्या बनी रहे, तो Streamlit Secrets में GEMINI_API_KEY की जाँच करें।")
+                # Show a short diagnostic so model/quota/API errors are not hidden.
+                detail = str(status).replace("\n", " ").strip()[:220]
+                ans=("इस समय Gemini से उत्तर प्राप्त नहीं हो सका। "
+                     "तकनीकी कारण: " + (detail or "अज्ञात API त्रुटि") + "। "
+                     "आपकी API key चैट में साझा करने की ज़रूरत नहीं है।")
             status="🟡 Offline / Gemini unavailable"
         st.session_state.chat_history.append(("assistant",ans))
         st.rerun()
