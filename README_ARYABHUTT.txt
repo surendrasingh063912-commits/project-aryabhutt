@@ -1,21 +1,26 @@
 PROJECT ARYABHUTT — V5.6 WEB
+AI-Assisted Educational Learning Platform
 
-Files:
-- app.py: complete Streamlit web app with the existing study, astronomy, analytics, admin, offline library, QR scanner and Gemini chatbot sections.
-- requirements.txt: Python dependencies.
+FILES
+- app.py: Streamlit web app, study tools, chatbot, Game Zone, AI Challenge, Riddle Challenge, and Treasure Hunt.
+- aryabhutt_v56_core.py: original V5.6 Python/Pydroid core/master reference, preserved separately.
+- requirements.txt: dependencies for the web adaptation.
+- README.md: full setup and deployment instructions.
 
-New challenge features:
-- Question count options: 5, 10, 15, 20, or 50.
-- 50-question Daily Quiz / AI Challenge / Treasure Hunt bank.
-- 50-riddle Riddle Challenge bank.
-- Challenge banks are local and can be used when Gemini is temporarily unavailable.
+CHALLENGE QUESTION COUNTS
+Daily Quiz, AI Challenge, Riddle Challenge, and Treasure Hunt let users choose 5, 10, 15, 20, or 50 questions. The curated local bank contains 50 challenge questions and 50 riddles, so these activities can still run without Gemini. AI Challenge uses this offline question bank; it does not claim every question is generated live by AI.
 
-Run locally:
+RUN
 1. Install Python 3.10+.
 2. Run: pip install -r requirements.txt
-3. Set GEMINI_API_KEY in Streamlit secrets (or environment/config appropriate for your deployment).
+3. Optional Gemini setup: add GEMINI_API_KEY in Streamlit Secrets. Never place API keys in app.py or commit them to GitHub.
 4. Run: streamlit run app.py
 
-For Streamlit Community Cloud, upload app.py and requirements.txt to the repository root, then add GEMINI_API_KEY in App settings > Secrets. Do not place API keys in app.py or commit them to GitHub.
+DEPLOYMENT
+For Streamlit Community Cloud, use app.py as the entry point and add GEMINI_API_KEY under app Settings > Secrets. Do not commit secrets.
 
-Note: syntax was checked; a live Gemini API request was not tested by this package build.
+VOICE
+The browser adaptation uses browser SpeechSynthesis where supported. Android/Pydroid-specific voice routes remain in the original V5.6 core source.
+
+NOTE
+The original V5.6 Python project is preserved separately as the core/master reference. The web version is an adaptation for browser access. Live Gemini behavior requires a valid configured key and has not been verified by a syntax check.
