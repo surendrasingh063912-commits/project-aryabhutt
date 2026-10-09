@@ -13,7 +13,7 @@ except Exception:
 
 APP_NAME = "PROJECT ARYABHUTT"
 VERSION = "V5.6 WEB • RESTORED STUDY EDITION"
-GEMINI_MODEL = "gemini-2.5-flash"  # Stable Gemini API model
+GEMINI_MODEL = "gemini-3.8-flash"  # Model name confirmed by the API error returned to the user
 
 st.set_page_config(page_title=APP_NAME, page_icon="🪷", layout="wide")
 
@@ -367,6 +367,107 @@ def home():
     st.write("V5.6 core के study content को छोटा करके नहीं, बल्कि web-friendly cards, tabs, visuals और dashboards में प्रस्तुत किया गया है।")
 
 # -------------------- AI CHAT --------------------
+# -------------------- EXPANDABLE OFFLINE KNOWLEDGE BANK --------------------
+# Curated local answers: available even when Gemini or internet is unavailable.
+OFFLINE_KB = [
+# Astronomy
+({"astronomy","खगोल विज्ञान","खगोलविज्ञान","universe","ब्रह्मांड","universe क्या"}, "ब्रह्मांड में space, time, matter और energy शामिल हैं। इसमें अरबों galaxies हैं; हमारा सौरमंडल Milky Way galaxy में है।"),
+({"big bang","बिग बैंग","universe origin","ब्रह्मांड की उत्पत्ति"}, "Big Bang मॉडल के अनुसार ब्रह्मांड लगभग 13.8 अरब वर्ष पहले अत्यंत गर्म और घनी अवस्था से फैलना शुरू हुआ। यह अंतरिक्ष में किसी एक स्थान पर साधारण विस्फोट जैसा नहीं था।"),
+({"sun","सूर्य","सूरज"}, "सूर्य हमारे सौरमंडल का तारा है। इसके केंद्र में nuclear fusion से ऊर्जा निकलती है, जो प्रकाश और ऊष्मा के रूप में हम तक पहुँचती है।"),
+({"moon","चंद्रमा","चाँद","चांद"}, "चंद्रमा पृथ्वी का प्राकृतिक उपग्रह है। इसकी कलाएँ सूर्य, पृथ्वी और चंद्रमा की बदलती स्थिति के कारण दिखाई देती हैं।"),
+({"black hole","ब्लैक होल","कृष्ण विवर"}, "ब्लैक होल अंतरिक्ष का ऐसा क्षेत्र है जहाँ गुरुत्वाकर्षण इतना प्रबल होता है कि घटना क्षितिज के भीतर से प्रकाश भी बाहर नहीं निकल सकता।"),
+({"light year","प्रकाश वर्ष"}, "प्रकाश-वर्ष दूरी की इकाई है, समय की नहीं। प्रकाश एक वर्ष में लगभग 9.46 ट्रिलियन किलोमीटर चलता है।"),
+({"gravity","गुरुत्वाकर्षण","गुरुत्व बल"}, "गुरुत्वाकर्षण वह आकर्षण है जो द्रव्यमान वाली वस्तुओं के बीच होता है। इसी कारण वस्तुएँ पृथ्वी की ओर गिरती हैं और ग्रह सूर्य की परिक्रमा करते हैं।"),
+({"eclipse","ग्रहण","सूर्य ग्रहण","चंद्र ग्रहण"}, "सूर्य ग्रहण तब होता है जब चंद्रमा सूर्य और पृथ्वी के बीच आता है। चंद्र ग्रहण तब होता है जब पृथ्वी की छाया चंद्रमा पर पड़ती है।"),
+({"mars","मंगल","red planet","लाल ग्रह"}, "मंगल को लाल ग्रह कहते हैं क्योंकि उसकी सतह की धूल में iron oxide यानी जंग जैसे यौगिक हैं।"),
+({"jupiter","बृहस्पति","largest planet","सबसे बड़ा ग्रह"}, "बृहस्पति सौरमंडल का सबसे बड़ा ग्रह है। उसके वातावरण में Great Red Spot नाम का विशाल तूफानी क्षेत्र है।"),
+({"saturn","शनि","rings of saturn","शनि के छल्ले"}, "शनि अपने स्पष्ट वलयों के लिए प्रसिद्ध है। ये मुख्यतः बर्फ के कणों, धूल और चट्टानी पदार्थ से बने हैं।"),
+({"milky way","आकाशगंगा","मंदाकिनी"}, "हमारी galaxy को Milky Way कहते हैं। सूर्य इसके अनेक तारों में से एक है।"),
+({"rotation","घूर्णन","दिन और रात","day and night"}, "पृथ्वी का अपनी धुरी पर घूमना घूर्णन कहलाता है। इसी से दिन और रात का चक्र बनता है; एक घूर्णन लगभग 24 घंटे का है।"),
+({"revolution","परिक्रमण","ऋतु","seasons","मौसम क्यों बदलते"}, "पृथ्वी सूर्य की परिक्रमा करती है और उसकी धुरी लगभग 23.5° झुकी है। धुरी का झुकाव और परिक्रमा मिलकर ऋतुओं का मुख्य कारण बनते हैं।"),
+({"planet","planets","ग्रह","सौरमंडल","solar system"}, "सौरमंडल में आठ ग्रह हैं: बुध, शुक्र, पृथ्वी, मंगल, बृहस्पति, शनि, अरुण (यूरेनस) और वरुण (नेपच्यून)। सभी सूर्य की परिक्रमा करते हैं।"),
+({"star","तारा","तारे"}, "तारे गर्म गैस/प्लाज़्मा के विशाल गोले हैं। उनके केंद्र में fusion ऊर्जा पैदा कर सकता है; सूर्य भी एक तारा है।"),
+# Mathematics
+({"zero","शून्य","0 का महत्व"}, "शून्य संख्या के रूप में और place-value notation में महत्वपूर्ण है। उदाहरण: 205 में शून्य बताता है कि दहाई के स्थान पर कोई दहाई नहीं है।"),
+({"pi","पाई","π"}, "π वृत्त की परिधि और व्यास का अनुपात है। इसका लगभग मान 3.14159 है; वृत्त का क्षेत्रफल πr² होता है।"),
+({"pythagoras","पाइथागोरस","पाइथागोरस प्रमेय"}, "समकोण त्रिभुज में कर्ण² = आधार² + लंब²। इसे a² + b² = c² लिखते हैं, जहाँ c कर्ण है।"),
+({"prime number","अभाज्य संख्या","prime"}, "अभाज्य संख्या 1 से बड़ी ऐसी पूर्ण संख्या है जिसके केवल दो धनात्मक भाजक होते हैं: 1 और स्वयं। उदाहरण: 2, 3, 5, 7, 11।"),
+({"fraction","भिन्न","fractions"}, "भिन्न किसी पूर्ण के भाग को दर्शाती है। a/b में b शून्य नहीं हो सकता; जैसे 3/4 का अर्थ चार बराबर भागों में से तीन भाग है।"),
+({"percentage","प्रतिशत","percent","%"}, "प्रतिशत का अर्थ प्रति सौ है। x% of N = (x/100) × N। उदाहरण: 200 का 25% = 50।"),
+({"algebra","बीजगणित","variable","चर"}, "बीजगणित में अक्षर या symbols अज्ञात अथवा बदलती राशियों को दर्शाते हैं। उदाहरण: x + 3 = 7 में x = 4।"),
+({"area of circle","वृत्त का क्षेत्रफल","circle area"}, "वृत्त का क्षेत्रफल A = πr² है, जहाँ r त्रिज्या है। परिधि C = 2πr होती है।"),
+({"area of rectangle","आयत का क्षेत्रफल","rectangle area"}, "आयत का क्षेत्रफल = लंबाई × चौड़ाई। परिमाप = 2 × (लंबाई + चौड़ाई)।"),
+({"area of triangle","त्रिभुज का क्षेत्रफल","triangle area"}, "त्रिभुज का क्षेत्रफल = ½ × आधार × ऊँचाई।"),
+({"prime factors","गुणनखंड","hcf","महत्तम समापवर्तक","lcm","लघुत्तम समापवर्त्य"}, "HCF सबसे बड़ा साझा गुणनखंड है। LCM सबसे छोटा साझा धनात्मक गुणज है। उदाहरण: 12 और 18 का HCF = 6 तथा LCM = 36।"),
+({"pythagoras theorem","समकोण त्रिभुज"}, "समकोण त्रिभुज में सबसे लंबी भुजा कर्ण कहलाती है और कर्ण² = अन्य दो भुजाओं के वर्गों का योग होता है।"),
+({"speed","चाल","गति","distance","दूरी"}, "औसत चाल = कुल दूरी ÷ कुल समय। दूरी = चाल × समय। इकाइयों को एक जैसा रखना ज़रूरी है, जैसे km और hours।"),
+({"probability","प्रायिकता","संभावना"}, "समान रूप से संभावित परिणामों में प्रायिकता = अनुकूल परिणामों की संख्या ÷ कुल संभावित परिणामों की संख्या। इसका मान 0 से 1 के बीच होता है।"),
+# Science
+({"photosynthesis","प्रकाश संश्लेषण","प्रकाशसंश्लेषण"}, "हरे पौधे प्रकाश ऊर्जा की सहायता से पानी और कार्बन डाइऑक्साइड से glucose बनाते हैं और ऑक्सीजन छोड़ते हैं। इस प्रक्रिया को प्रकाश संश्लेषण कहते हैं।"),
+({"atom","परमाणु","molecule","अणु"}, "परमाणु पदार्थ की रासायनिक पहचान की मूल इकाई है। अणु दो या अधिक परमाणुओं के रासायनिक बंध से बन सकता है।"),
+({"force","बल","newton law","न्यूटन के नियम"}, "बल वस्तु की गति या आकार बदल सकता है। न्यूटन का दूसरा नियम F = ma बताता है कि कुल बल = द्रव्यमान × त्वरण।"),
+({"electricity","बिजली","विद्युत धारा","current"}, "विद्युत धारा आवेश के प्रवाह की दर है। सरल परिपथ में battery, conducting wires और device का बंद रास्ता होना चाहिए।"),
+({"water cycle","जल चक्र","वाष्पीकरण","evaporation"}, "जल चक्र में वाष्पीकरण, संघनन, वर्षण और पानी का धरती पर बहना/भूमि में जाना शामिल है। सूर्य इसकी ऊर्जा का प्रमुख स्रोत है।"),
+({"states of matter","पदार्थ की अवस्थाएँ","solid liquid gas","ठोस द्रव गैस"}, "पदार्थ की सामान्य अवस्थाएँ ठोस, द्रव और गैस हैं। प्लाज़्मा भी एक महत्वपूर्ण अवस्था है। कणों की व्यवस्था और ऊर्जा से गुण बदलते हैं।"),
+({"acid base","अम्ल क्षार","ph scale","पीएच"}, "जलीय विलयन में pH 7 से कम सामान्यतः अम्लीय, 7 के आसपास उदासीन और 7 से अधिक क्षारीय होता है; तापमान और विलयन की प्रकृति भी मायने रखते हैं।"),
+({"human heart","हृदय","heart"}, "मानव हृदय चार कक्षों वाला पेशीय अंग है। यह रक्त को फेफड़ों और शरीर के अन्य भागों तक पंप करता है।"),
+({"dna","डीएनए","genetics","आनुवंशिकी"}, "DNA में जीवों के विकास और कार्य से जुड़ी आनुवंशिक जानकारी संग्रहित होती है। जीन DNA के विशिष्ट भाग होते हैं।"),
+({"climate change","जलवायु परिवर्तन","global warming","ग्लोबल वार्मिंग"}, "मानवीय गतिविधियों से बढ़ी greenhouse gases पृथ्वी की औसत सतह का तापमान बढ़ा रही हैं। ऊर्जा बचत, स्वच्छ ऊर्जा और पारिस्थितिकी संरक्षण मदद कर सकते हैं।"),
+# History and civics
+({"aryabhata","आर्यभट्ट","aryabhata"}, "आचार्य आर्यभट्ट प्राचीन भारत के गणितज्ञ और खगोलविद थे। उनकी रचना आर्यभटीय लगभग 499 ईस्वी की है। उन्होंने गणित और खगोल-विज्ञान में महत्वपूर्ण योगदान दिया।"),
+({"indus valley","सिंधु घाटी सभ्यता","हड़प्पा","हड़प्पा सभ्यता"}, "सिंधु घाटी सभ्यता की प्रमुख बस्तियों में हड़प्पा और मोहनजोदड़ो शामिल हैं। नगर नियोजन, जल निकासी और व्यापार इसकी उल्लेखनीय विशेषताएँ थीं।"),
+({"ashoka","अशोक","सम्राट अशोक"}, "सम्राट अशोक मौर्य वंश के शासक थे। कलिंग युद्ध के बाद उनके शासन में धम्म, नैतिक आचरण और शिलालेखों का महत्व बढ़ा।"),
+({"akbar","अकबर","मुगल"}, "अकबर मुगल साम्राज्य का शासक था। उसका शासन प्रशासन, राजस्व व्यवस्था और विभिन्न समुदायों के साथ संबंधों के लिए अध्ययन किया जाता है।"),
+({"1857","revolt of 1857","1857 का विद्रोह","प्रथम स्वतंत्रता संग्राम"}, "1857 का विद्रोह ब्रिटिश ईस्ट इंडिया कंपनी के शासन के विरुद्ध व्यापक सैन्य और नागरिक विद्रोह था। इसके कारण राजनीतिक, आर्थिक, सैन्य और सामाजिक थे।"),
+({"independence day","स्वतंत्रता दिवस","15 august","15 अगस्त"}, "भारत 15 अगस्त 1947 को ब्रिटिश शासन से स्वतंत्र हुआ। भारत हर वर्ष 15 अगस्त को स्वतंत्रता दिवस मनाता है।"),
+({"constitution","संविधान","26 january","गणतंत्र दिवस"}, "भारत का संविधान 26 नवंबर 1949 को अपनाया गया और 26 जनवरी 1950 से लागू हुआ। इसलिए 26 जनवरी को गणतंत्र दिवस मनाया जाता है।"),
+({"mahatma gandhi","महात्मा गांधी","गांधीजी"}, "महात्मा गांधी ने भारतीय स्वतंत्रता आंदोलन में अहिंसक प्रतिरोध और सत्याग्रह को प्रमुख बनाया।"),
+({"rani lakshmibai","रानी लक्ष्मीबाई","झांसी की रानी"}, "रानी लक्ष्मीबाई झाँसी की शासक थीं और 1857 के विद्रोह में ब्रिटिश शासन के विरुद्ध संघर्ष के लिए जानी जाती हैं।"),
+# Sanskrit
+({"sanskrit","संस्कृत","देवभाषा"}, "संस्कृत भारत की प्राचीन शास्त्रीय भाषाओं में से एक है। इसमें वेद, उपनिषद, महाकाव्य, नाटक, दर्शन और गणित/खगोल-विज्ञान से जुड़े ग्रंथ रचे गए।"),
+({"namaste in sanskrit","संस्कृत में नमस्ते","नमः","नमस्ते का अर्थ"}, "‘नमस्ते’ अभिवादन है; इसे सामान्यतः ‘आपको नमस्कार’ या ‘मैं आपके प्रति सम्मान प्रकट करता/करती हूँ’ के भाव में समझा जाता है।"),
+({"रामः","राम शब्द","rama in sanskrit","राम शब्द रूप"}, "राम शब्द (पुल्लिंग, अकारान्त) के प्रथमा एकवचन में ‘रामः’, द्विवचन में ‘रामौ’ और बहुवचन में ‘रामाः’ आते हैं। यह केवल आरम्भिक उदाहरण है; पूरा शब्दरूप आठ विभक्तियों में पढ़ा जाता है।"),
+({"गम् धातु","gam dhatu","संस्कृत धातु","धातु रूप"}, "‘गम्’ धातु का अर्थ जाना है। लट् लकार, प्रथम पुरुष, एकवचन में रूप ‘गच्छति’ होता है—अर्थात् वह जाता है।"),
+({"संस्कृत वर्णमाला","sanskrit alphabet","स्वर व्यंजन"}, "संस्कृत वर्णमाला में स्वर और व्यंजन पढ़े जाते हैं। पाठ्यपुस्तक/परंपरा के अनुसार सूची में कुछ अंतर हो सकता है; सामान्यतः अ, आ, इ, ई आदि स्वर और क, ख, ग आदि व्यंजन सिखाए जाते हैं।"),
+({"विद्या ददाति विनयम्","सुभाषित","संस्कृत श्लोक"}, "‘विद्या ददाति विनयम्’ का अर्थ है—विद्या विनम्रता देती है। यह संस्कृत में शिक्षा के महत्व पर प्रचलित सुभाषित का आरम्भिक अंश है।"),
+# Language, computing and environment
+({"algorithm","एल्गोरिदम","कलन विधि"}, "Algorithm किसी समस्या को हल करने के स्पष्ट, क्रमबद्ध चरणों का समूह है। एक ही समस्या के लिए कई सही algorithms हो सकते हैं।"),
+({"python programming","python","पाइथन कोडिंग","coding"}, "Python एक high-level programming language है। इसका उपयोग automation, data analysis, education, web apps और AI में होता है।"),
+({"internet","इंटरनेट","network"}, "Internet दुनिया भर के अनेक computer networks को जोड़ता है। किसी लिंक या वेबसाइट पर जाने से पहले स्रोत और सुरक्षा की जाँच करना अच्छा अभ्यास है।"),
+({"cyber safety","साइबर सुरक्षा","password","पासवर्ड"}, "हर खाते के लिए अलग मजबूत पासवर्ड/पासफ्रेज़ रखें, two-factor authentication चालू करें, संदिग्ध लिंक न खोलें और OTP या पासवर्ड किसी को न दें।"),
+({"pollution","प्रदूषण","air pollution","वायु प्रदूषण"}, "प्रदूषण हवा, पानी, मिट्टी या ध्वनि की गुणवत्ता को नुकसान पहुँचा सकता है। स्रोत घटाना, कचरे का सही प्रबंधन और स्वच्छ ऊर्जा महत्वपूर्ण उपाय हैं।"),
+({"ecosystem","पारिस्थितिकी तंत्र","food chain","खाद्य श्रृंखला"}, "पारिस्थितिकी तंत्र में जीव और उनका निर्जीव पर्यावरण परस्पर क्रिया करते हैं। खाद्य श्रृंखला ऊर्जा के एक जीव से दूसरे जीव तक जाने का सरल मॉडल है।"),
+]
+
+def offline_answer(question):
+    """Return a locally stored answer or None; never requires network access."""
+    q = str(question).lower().strip()
+    # Basic arithmetic parser: allow only digits, spaces, decimal points and arithmetic operators.
+    import re, ast, operator
+    if re.fullmatch(r'[\d\s.+*/()%\-]+', q) and any(ch.isdigit() for ch in q):
+        try:
+            node = ast.parse(q, mode='eval')
+            ops = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv, ast.Pow: operator.pow, ast.Mod: operator.mod, ast.USub: operator.neg, ast.UAdd: operator.pos}
+            def calc(n):
+                if isinstance(n, ast.Expression): return calc(n.body)
+                if isinstance(n, ast.Constant) and isinstance(n.value, (int,float)): return n.value
+                if isinstance(n, ast.BinOp) and type(n.op) in ops: return ops[type(n.op)](calc(n.left), calc(n.right))
+                if isinstance(n, ast.UnaryOp) and type(n.op) in ops: return ops[type(n.op)](calc(n.operand))
+                raise ValueError('unsupported')
+            val=calc(node)
+            if abs(val) < 10**15: return f"गणना का उत्तर: {val:g}"
+        except Exception: pass
+    best=None; bestscore=0
+    for keys, answer in OFFLINE_KB:
+        score=0
+        for k in keys:
+            if k in q: score=max(score, len(k) + 4)
+        if score>bestscore: bestscore=score; best=answer
+    if best: return best + "\n\nज्ञान की ज्योति जलाए रखो।"
+    if any(x in q for x in ["hello","hi","hey","नमस्ते","नमस्कार","प्रणाम"]):
+        return "नमस्ते! मैं PROJECT ARYABHUTT का ऑफलाइन ज्ञान-सहायक हूँ। गणित, खगोल-विज्ञान, विज्ञान, इतिहास, संस्कृत, तकनीक और पर्यावरण से प्रश्न पूछ सकते हैं।"
+    return None
+
 def chatbot():
     section("आर्यभट्ट — AI Knowledge Chat","🤖")
     st.caption("Continuous conversation • Gemini Online • V5.6 Offline Knowledge Book • Hindi-first • Browser Voice")
@@ -381,21 +482,14 @@ def chatbot():
         st.session_state.chat += 1
         ans, status = gemini_answer(q)
         if ans is None:
-            # Small offline knowledge fallback
-            low=q.lower()
-            if "abdul kalam" in low or "कलाम" in q:
-                ans="डॉ. ए.पी.जे. अब्दुल कलाम भारत के प्रसिद्ध वैज्ञानिक और भारत के पूर्व राष्ट्रपति थे। उन्हें 'मिसाइल मैन ऑफ इंडिया' कहा जाता है।"
-            elif "aryabhat" in low or "आर्यभट्ट" in q:
-                ans="आर्यभट्ट प्राचीन भारत के महान गणितज्ञ और खगोलविद थे। उनके कार्यों ने गणित और खगोल विज्ञान की परंपरा को महत्वपूर्ण रूप से प्रभावित किया।"
-            elif "planet" in low or "ग्रह" in q:
-                ans="हमारे सौरमंडल में आठ ग्रह हैं: बुध, शुक्र, पृथ्वी, मंगल, बृहस्पति, शनि, यूरेनस और नेपच्यून।"
-            else:
-                # Show a short diagnostic so model/quota/API errors are not hidden.
-                detail = str(status).replace("\n", " ").strip()[:220]
-                ans=("इस समय Gemini से उत्तर प्राप्त नहीं हो सका। "
-                     "तकनीकी कारण: " + (detail or "अज्ञात API त्रुटि") + "। "
-                     "आपकी API key चैट में साझा करने की ज़रूरत नहीं है।")
-            status="🟡 Offline / Gemini unavailable"
+            ans = offline_answer(q)
+            if ans is None:
+                detail = str(status).replace("\n", " ").strip()[:160]
+                ans = ("यह प्रश्न अभी स्थानीय ऑफलाइन ज्ञान-संग्रह में नहीं मिला। इंटरनेट/Gemini उपलब्ध होने पर फिर पूछें, "
+                       "या प्रश्न को किसी स्पष्ट शब्द/विषय के साथ लिखें।\n\n"
+                       "तकनीकी स्थिति: " + (detail or "ऑफलाइन मोड सक्रिय") + "\n\n"
+                       "नोट: ऑफलाइन संग्रह में चुने हुए विषयों के उत्तर हैं; यह दुनिया के हर प्रश्न का संपूर्ण विश्वकोश नहीं है।")
+            status = "🟡 Offline Knowledge Book"
         st.session_state.chat_history.append(("assistant",ans))
         st.rerun()
     client, s = gemini_client()
@@ -760,12 +854,64 @@ def settings():
     st.write("☁️ **Data / Update:** Web demo is an adaptation of the original V5.6 MASTER; it does not pretend to be a full cloud database.")
     st.write("🔐 **Teacher/Admin:** Use the sidebar option to open the secured dashboard.")
 
+# -------------------- OFFLINE LIBRARY + QR SCANNER --------------------
+def offline_library():
+    section("Offline Knowledge Library • ऑफलाइन ज्ञान-संग्रह", "📚")
+    st.info(f"इस संस्करण में {len(OFFLINE_KB)} curated विषय-समूहों के स्थानीय उत्तर हैं। ये इंटरनेट के बिना भी काम करते हैं; यह हर संभव प्रश्न का संपूर्ण विश्वकोश नहीं है।")
+    subject = st.selectbox("विषय चुनें", ["सभी विषय", "Astronomy / खगोल-विज्ञान", "Mathematics / गणित", "Science / विज्ञान", "History / इतिहास", "Sanskrit / संस्कृत", "Technology / तकनीक", "Environment / पर्यावरण"])
+    query = st.text_input("प्रश्न या keyword खोजें", placeholder="जैसे black hole, प्रकाश संश्लेषण, राम शब्द रूप, 12*8")
+    if query.strip():
+        answer=offline_answer(query)
+        if answer: st.success(answer)
+        else: st.warning("इस शब्द का उत्तर अभी offline bank में नहीं मिला। खोज के लिए दूसरा keyword आज़माएँ।")
+    st.markdown("### उपलब्ध स्थानीय विषय")
+    for label, keys in [
+        ("खगोल-विज्ञान", "सौरमंडल, ग्रह, सूर्य, चंद्रमा, ब्लैक होल, आकाशगंगा, ग्रहण, गुरुत्वाकर्षण"),
+        ("गणित", "शून्य, π, प्रतिशत, भिन्न, बीजगणित, क्षेत्रफल, HCF/LCM, चाल और दूरी; सरल arithmetic calculator"),
+        ("विज्ञान", "प्रकाश संश्लेषण, परमाणु, बल, विद्युत, जल चक्र, पदार्थ की अवस्थाएँ, हृदय, DNA, जलवायु"),
+        ("इतिहास / नागरिक शास्त्र", "आर्यभट्ट, सिंधु घाटी सभ्यता, अशोक, अकबर, 1857, स्वतंत्रता दिवस, संविधान, गांधी"),
+        ("संस्कृत", "संस्कृत भाषा, अभिवादन, राम शब्द रूप, गम् धातु, वर्णमाला, सुभाषित"),
+        ("तकनीक / पर्यावरण", "algorithm, Python, internet, cyber safety, pollution, ecosystem"),
+    ]:
+        with st.expander(label): st.write(keys)
+    st.caption("नए प्रश्नों के लिए इस स्थानीय knowledge bank में curated Q&A जोड़कर इसे आगे बढ़ाया जा सकता है।")
+
+def scanner_page():
+    section("QR Scanner • स्कैनर", "🔎")
+    st.write("QR कोड स्कैन करने के लिए कैमरा अनुमति दें। कैमरा ब्राउज़र में ही चलता है; अगर कैमरा उपलब्ध न हो तो QR की तस्वीर अपलोड करें।")
+    components.html(r'''<div style="font-family:Arial,sans-serif;color:inherit">
+      <video id="qr-video" autoplay playsinline style="width:100%;max-width:480px;border-radius:12px;background:#111"></video>
+      <p id="qr-status">कैमरा शुरू करने के लिए बटन दबाएँ।</p>
+      <button id="qr-start" style="padding:10px 14px;border-radius:8px">📷 कैमरा शुरू करें</button>
+      <button id="qr-stop" style="padding:10px 14px;border-radius:8px">रोकें</button>
+      <div id="qr-result" style="overflow-wrap:anywhere;margin-top:10px;font-weight:bold"></div>
+      <script>
+      (()=>{const v=document.getElementById('qr-video'),s=document.getElementById('qr-status'),r=document.getElementById('qr-result');let stream=null,active=false,detector=null;
+      document.getElementById('qr-start').onclick=async()=>{try{if(!('BarcodeDetector'in window)){s.textContent='इस ब्राउज़र में live QR detection उपलब्ध नहीं है। QR तस्वीर अपलोड करने वाला विकल्प नीचे है।';return;} detector=new BarcodeDetector({formats:['qr_code']});stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});v.srcObject=stream;active=true;s.textContent='QR को कैमरे के सामने रखें…';scan();}catch(e){s.textContent='कैमरा नहीं खुला: '+e.message+'। अनुमति जाँचें या QR तस्वीर अपलोड करें।';}};
+      async function scan(){if(!active||!detector)return;try{const codes=await detector.detect(v);if(codes.length){r.textContent='स्कैन परिणाम: '+codes[0].rawValue;s.textContent='QR सफलतापूर्वक पढ़ लिया गया।';active=false;return;}}catch(e){}requestAnimationFrame(scan);}
+      document.getElementById('qr-stop').onclick=()=>{active=false;if(stream)stream.getTracks().forEach(t=>t.stop());v.srcObject=null;s.textContent='कैमरा रोक दिया गया।';};})();
+      </script></div>''', height=430)
+    st.markdown("**QR तस्वीर अपलोड करें**")
+    image_file=st.file_uploader("QR कोड की तस्वीर चुनें", type=["png","jpg","jpeg","webp"], key="qr_upload")
+    if image_file:
+        st.image(image_file, caption="अपलोड की गई तस्वीर", width=260)
+        try:
+            import cv2, numpy as np
+            image_file.seek(0)
+            arr=np.frombuffer(image_file.read(),np.uint8)
+            image=cv2.imdecode(arr,cv2.IMREAD_COLOR)
+            value, points, _ = cv2.QRCodeDetector().detectAndDecode(image)
+            if value: st.success("स्कैन परिणाम"); st.code(value)
+            else: st.warning("QR नहीं पढ़ पाया। साफ़, सीधी और अच्छी रोशनी वाली तस्वीर आज़माएँ।")
+        except Exception:
+            st.info("तस्वीर दिख रही है, लेकिन इस सर्वर पर image decoder उपलब्ध नहीं है। Chrome में ऊपर live camera scanner आज़माएँ।")
+
 # -------------------- SIDEBAR / ROUTING --------------------
 with st.sidebar:
     st.markdown("### 🪷 PROJECT ARYABHUTT")
     st.caption("V5.6 WEB • Learn • Visualize • Practice • Explore • Track")
     page=st.radio("Menu",[
-        "Home","AI Chatbot","Treasure Hunt","Game Zone","Study Center",
+        "Home","AI Chatbot","Offline Knowledge Library","QR Scanner","Treasure Hunt","Game Zone","Study Center",
         "Space & Visualizers","Data & Analytics","Reports","Feedback","Settings",
         "Teacher / Admin"
     ])
@@ -776,6 +922,8 @@ with st.sidebar:
 
 if page=="Home": home()
 elif page=="AI Chatbot": chatbot()
+elif page=="Offline Knowledge Library": offline_library()
+elif page=="QR Scanner": scanner_page()
 elif page=="Game Zone": games()
 elif page=="Study Center": study_center()
 elif page=="Space & Visualizers": space_visualizers()
