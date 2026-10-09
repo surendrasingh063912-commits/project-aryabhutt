@@ -16,7 +16,8 @@ except Exception:
 APP_NAME = "PROJECT ARYABHUTT"
 VERSION = "V5.6 WEB • RESTORED STUDY + 50-QUESTION CHALLENGES"
 GEMINI_MODEL = "gemini-3.8-flash"
-GEMINI_FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite")
+# Stable model fallbacks documented by Google Gemini API.
+GEMINI_FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
 
 st.set_page_config(page_title=APP_NAME, page_icon="🪷", layout="wide")
 
@@ -45,15 +46,58 @@ def db_connect():
     return conn
 
 def db_init():
+    """Create tables and safely migrate legacy activity-event schemas in place."""
     with db_connect() as con:
+        con.execute("PRAGMA foreign_keys=ON")
         con.executescript("""
-        CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, note TEXT DEFAULT '', created_at TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS students(id INTEGER PRIMARY KEY, first_name TEXT NOT NULL, school_id INTEGER REFERENCES schools(id), class_section TEXT DEFAULT '', created_at TEXT NOT NULL, active INTEGER DEFAULT 1);
-        CREATE TABLE IF NOT EXISTS app_sessions(id TEXT PRIMARY KEY, student_id INTEGER NOT NULL REFERENCES students(id), started_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, ended_at TEXT DEFAULT '', estimated_minutes INTEGER DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS activity_events(id INTEGER PRIMARY KEY, session_id TEXT, student_id INTEGER, page TEXT DEFAULT '', event_type TEXT NOT NULL, details TEXT DEFAULT '', created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS schools(
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+            note TEXT DEFAULT '', created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS students(
+            id INTEGER PRIMARY KEY, first_name TEXT NOT NULL,
+            school_id INTEGER REFERENCES schools(id), class_section TEXT DEFAULT '',
+            created_at TEXT NOT NULL, active INTEGER DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS app_sessions(
+            id TEXT PRIMARY KEY, student_id INTEGER NOT NULL REFERENCES students(id),
+            started_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+            ended_at TEXT DEFAULT '', estimated_minutes INTEGER DEFAULT 0
+        );
         CREATE INDEX IF NOT EXISTS idx_sessions_student ON app_sessions(student_id);
-        CREATE INDEX IF NOT EXISTS idx_events_created ON activity_events(created_at);
         """)
+
+        # Important: inspect/migrate activity_events BEFORE creating any index on it.
+        # Some earlier app versions created this table with different column names.
+        event_columns = {row[1] for row in con.execute("PRAGMA table_info(activity_events)").fetchall()}
+        required = {"id", "session_id", "student_id", "page", "event_type", "details", "created_at"}
+        event_info = con.execute("PRAGMA table_info(activity_events)").fetchall()
+        unsafe_extra_columns = any(
+            row[1] not in required and row[3] and row[4] is None and row[1] != "id"
+            for row in event_info
+        )
+        if event_columns and (not required.issubset(event_columns) or unsafe_extra_columns):
+            tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            archive = "activity_events_legacy"
+            if archive in tables:
+                archive = "activity_events_legacy_" + datetime.now().strftime("%Y%m%d%H%M%S%f")
+            con.execute("DROP INDEX IF EXISTS idx_events_created")
+            con.execute(f"ALTER TABLE activity_events RENAME TO {archive}")
+            event_columns = set()
+
+        if not event_columns:
+            con.execute("""CREATE TABLE IF NOT EXISTS activity_events(
+                id INTEGER PRIMARY KEY,
+                session_id TEXT,
+                student_id INTEGER,
+                page TEXT DEFAULT '',
+                event_type TEXT NOT NULL,
+                details TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            )""")
+
+        # A pre-existing index may have survived a partial deployment; recreate it safely.
+        con.execute("CREATE INDEX IF NOT EXISTS idx_events_created ON activity_events(created_at)")
 
 def now_text(): return datetime.now().astimezone().isoformat(timespec="seconds")
 def db_rows(query, params=()):
@@ -75,15 +119,20 @@ def log_event(event_type,page=None,details=None):
     sid=st.session_state.get("current_session_id"); student_id=st.session_state.get("student_id")
     if not student_id: return
     created=now_text(); detail_text=json.dumps(details or {},ensure_ascii=False)
-    with db_connect() as con:
-        con.execute("INSERT INTO activity_events(session_id,student_id,page,event_type,details,created_at) VALUES(?,?,?,?,?,?)",(sid,student_id,page or st.session_state.get("current_page",""),event_type,detail_text,created))
-        if sid:
-            row=con.execute("SELECT started_at FROM app_sessions WHERE id=?",(sid,)).fetchone()
-            minutes=0
-            if row:
-                try: minutes=max(0,int((datetime.fromisoformat(created)-datetime.fromisoformat(row[0])).total_seconds()//60))
-                except Exception: pass
-            con.execute("UPDATE app_sessions SET last_seen_at=?, estimated_minutes=? WHERE id=?",(created,minutes,sid))
+    try:
+        with db_connect() as con:
+            con.execute("INSERT INTO activity_events(session_id,student_id,page,event_type,details,created_at) VALUES(?,?,?,?,?,?)",(sid,student_id,page or st.session_state.get("current_page",""),event_type,detail_text,created))
+            if sid:
+                row=con.execute("SELECT started_at FROM app_sessions WHERE id=?",(sid,)).fetchone()
+                minutes=0
+                if row:
+                    try: minutes=max(0,int((datetime.fromisoformat(created)-datetime.fromisoformat(row[0])).total_seconds()//60))
+                    except Exception: pass
+                con.execute("UPDATE app_sessions SET last_seen_at=?, estimated_minutes=? WHERE id=?",(created,minutes,sid))
+    except sqlite3.Error as exc:
+        # Activity logging must never crash the learning screen. The DB repair is run at startup;
+        # this visible warning helps diagnose host-level locking/permission problems.
+        st.warning(f"Activity log save issue (learning can continue): {str(exc)[:180]}")
 def rows_to_csv(rows):
     import csv, io
     if not rows: return ''
