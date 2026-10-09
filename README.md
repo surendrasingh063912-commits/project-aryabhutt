@@ -1,28 +1,32 @@
-# PROJECT ARYABHUTT — V5.6 WEB
+# PROJECT ARYABHUTT V5.6 WEB
 
-AI-assisted educational learning platform built with Streamlit.
+Hindi-first educational Streamlit app with Gemini chat and an offline knowledge fallback.
 
-## Files (four-file package)
-- `app.py` — Streamlit app, Gemini chatbot, browser voice, quizzes, Treasure Hunt, AI Challenge, Study Center, visualizers, reports, feedback, settings and Teacher/Admin dashboard.
-- `requirements.txt` — Python dependencies.
-- `README.md` — setup and deployment instructions.
-- `aryabhutt_v56_core.py` — original V5.6 core/master reference, preserved separately.
+## Files
+- `app.py` — Streamlit web application
+- `requirements.txt` — Python dependencies
+- `README.md` — setup notes
+- `aryabhutt_v56_core.py` — preserved original core/reference file
 
-## Run locally
-1. Install Python 3.10 or newer.
-2. Run `pip install -r requirements.txt`.
-3. Run `streamlit run app.py`.
-
-## Gemini setup
-Add `GEMINI_API_KEY` as a Streamlit secret. `GOOGLE_API_KEY` is also accepted. Do not commit API keys to GitHub. The app tries supported Gemini model IDs in sequence and shows a status/error when online generation fails. Actual availability still depends on the API key, project access, quota and network.
-
-Example `.streamlit/secrets.toml` (keep this file private and out of Git):
-```toml
-GEMINI_API_KEY = "paste-your-key-here-locally-only"
+## Run
+```bash
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
-## Quiz and challenge modes
-Daily Quiz, AI Challenge, Riddle/Brain Challenge and Treasure Hunt offer 5, 10, 15, 20 or 50 questions. The question bank includes Hindi and English prompts, three-choice multiple-choice questions and short-answer questions. The sidebar language selection controls question language.
+## Streamlit Secrets
+In the Streamlit app's Settings/Secrets, keep the existing API key if it is already saved for this same app. Do not paste the key into source code or share it in screenshots.
 
-## Voice and data
-Voice uses browser SpeechSynthesis where supported; availability depends on the browser/device. Some analytics/student data are session-based and are not a full cloud database. The original V5.6 core source remains a separate reference file.
+```toml
+GEMINI_API_KEY = "your-key"
+GEMINI_MODEL = "gemini-3.8-flash"
+ADMIN_PASSWORD = "choose-a-strong-private-password"
+```
+
+`GEMINI_MODEL` is optional; the app defaults to `gemini-3.8-flash`. A saved key does not guarantee a successful API request: timeouts, quota, network access, or account/model availability can still cause the app to use its clearly labelled offline fallback.
+
+## Activity records
+The app now records anonymous app sessions in a local SQLite database and shows those records in Teacher/Admin and Data & Analytics. These are **sessions, not verified unique students**: one child can use multiple devices and multiple children can share one device. The SQLite file is local to the running app and may be lost on restart/redeployment or may not be shared across multiple app instances. For permanent school-wide records, connect a hosted database before relying on the dashboard for official statistics. No student name is collected automatically.
+
+## Admin safety
+Set `ADMIN_PASSWORD` in Streamlit Secrets before publishing. The legacy demo fallback remains `aryabhutt` if the secret is missing, so do not publish the app until a private password is configured.

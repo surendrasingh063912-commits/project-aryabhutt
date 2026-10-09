@@ -1,6 +1,7 @@
 
-import os, json, math, random, html, time
-from datetime import datetime, date
+import os, json, math, random, html, time, sqlite3, uuid
+from pathlib import Path
+from datetime import datetime, date, timezone
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -15,8 +16,8 @@ except Exception:
 
 APP_NAME = "PROJECT ARYABHUTT"
 VERSION = "V5.6 WEB • RESTORED STUDY EDITION"
-GEMINI_MODEL = "gemini-3.8-flash"
-GEMINI_FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite")
+GEMINI_MODEL = "gemini-3.8-flash"  # Override with Streamlit Secret GEMINI_MODEL if needed
+DB_PATH = Path(os.environ.get("ARYABHUTT_DB_PATH", "aryabhutt_activity.db"))
 
 st.set_page_config(page_title=APP_NAME, page_icon="🪷", layout="wide")
 
@@ -33,6 +34,51 @@ for k, v in DEFAULTS.items():
         st.session_state[k] = v
 st.session_state.sessions += 1 if not st.session_state.get("_session_counted") else 0
 st.session_state["_session_counted"] = True
+
+# -------------------- ANONYMOUS VISITOR ACTIVITY --------------------
+# Counts browser/app sessions, NOT verified individual students. A local SQLite
+# file is suitable for a demo; use a hosted database for durable multi-user records.
+def db_connect():
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_activity_db():
+    with db_connect() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS visitor_sessions (
+            visitor_id TEXT PRIMARY KEY,
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            visit_count INTEGER NOT NULL DEFAULT 1
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS activity_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            visitor_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )""")
+
+def record_visit_once():
+    if st.session_state.get("_visitor_recorded"):
+        return
+    visitor_id = st.session_state.get("_visitor_id") or uuid.uuid4().hex[:12].upper()
+    st.session_state["_visitor_id"] = visitor_id
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with db_connect() as conn:
+        exists = conn.execute("SELECT 1 FROM visitor_sessions WHERE visitor_id=?", (visitor_id,)).fetchone()
+        if exists:
+            conn.execute("UPDATE visitor_sessions SET last_seen=?, visit_count=visit_count+1 WHERE visitor_id=?", (now, visitor_id))
+        else:
+            conn.execute("INSERT INTO visitor_sessions(visitor_id, first_seen, last_seen, visit_count) VALUES(?,?,?,1)", (visitor_id, now, now))
+        conn.execute("INSERT INTO activity_events(visitor_id,event_type,created_at) VALUES(?,?,?)", (visitor_id, "app_open", now))
+    st.session_state["_visitor_recorded"] = True
+
+try:
+    init_activity_db()
+    record_visit_once()
+    st.session_state["activity_db_error"] = ""
+except Exception as _db_exc:
+    st.session_state["activity_db_error"] = str(_db_exc)[:160]
 
 # -------------------- DATA FROM V5.6 CORE --------------------
 STORY_POINTS = [
@@ -281,7 +327,7 @@ def gemini_client():
         return None, "GEMINI_API_KEY नहीं मिला"
     try:
         # Bound network wait so the chat never spins for minutes.
-        http_options = genai_types.HttpOptions(timeout=10000) if genai_types else None
+        http_options = genai_types.HttpOptions(timeout=30000) if genai_types else None
         if http_options is not None:
             return genai.Client(api_key=key, http_options=http_options), "ready"
         return genai.Client(api_key=key), "ready"
@@ -313,25 +359,26 @@ def gemini_answer(prompt):
         "पिछली बातचीत का संदर्भ:\n" + (conversation or "यह पहली बातचीत है।") + "\n\n"
         "नया प्रश्न: " + str(prompt)
     )
-    errors = []
-    for model_name in dict.fromkeys((GEMINI_MODEL, *GEMINI_FALLBACK_MODELS)):
-        try:
-            r = client.models.generate_content(model=model_name, contents=system_prompt)
-            answer = getattr(r, "text", None)
-            if answer and str(answer).strip():
-                answer = str(answer).strip()
-                signoff = "🌼 ज्ञान की ज्योति जलाए रखो, प्रिय बालक। आयुष्मान भवः!\nअब बताओ, अगली कौन-सी जिज्ञासा सुलझाएँ?"
-                for marker in ("🌼 ज्ञान की ज्योति जलाए रखो", "आयुष्मान भवः", "आयुष्मान भव।"):
-                    pos = answer.find(marker)
-                    if pos >= 0:
-                        answer = answer[:pos].rstrip()
-                        break
-                answer = answer + "\n\n" + signoff
-                return answer, f"🟢 Gemini Online ({model_name})"
-            errors.append(f"{model_name}: empty response")
-        except Exception as e:
-            errors.append(f"{model_name}: {str(e).replace(chr(10), ' ')[:130]}")
-    return None, "Gemini models tried: " + " | ".join(errors[:3])
+    try:
+        # Single attempt + 10-second HTTP timeout: do not retry into a long spinner.
+        model = str(st.secrets.get("GEMINI_MODEL", GEMINI_MODEL))
+        r = client.models.generate_content(model=model, contents=system_prompt)
+        answer = getattr(r, "text", None)
+        if answer and str(answer).strip():
+            answer = str(answer).strip()
+            signoff = "🌼 ज्ञान की ज्योति जलाए रखो, प्रिय बालक। आयुष्मान भवः!\nअब बताओ, अगली कौन-सी जिज्ञासा सुलझाएँ?"
+            # Keep one consistent Aryabhatt-inspired ending without duplicate sign-offs.
+            for marker in ("🌼 ज्ञान की ज्योति जलाए रखो", "आयुष्मान भवः", "आयुष्मान भव।"):
+                pos = answer.find(marker)
+                if pos >= 0:
+                    answer = answer[:pos].rstrip()
+                    break
+            answer = answer + "\n\n" + signoff
+            return answer, "🟢 Gemini Online"
+        return None, "Gemini ने खाली उत्तर दिया"
+    except Exception as e:
+        last_error = str(e).replace("\n", " ").strip()[:180]
+        return None, last_error or "Gemini सेवा अभी उपलब्ध नहीं है"
 
 def browser_voice(text, key):
     """Render a browser Hindi voice button for the supplied answer."""
@@ -509,8 +556,6 @@ def chatbot():
         st.session_state.chat_history.append(("user",q))
         st.session_state.chat += 1
         ans, status = gemini_answer(q)
-        gemini_status = status
-        gemini_online = str(status).startswith("🟢 Gemini Online")
         if ans is None:
             ans = offline_answer(q)
             if ans is None:
@@ -524,8 +569,6 @@ def chatbot():
                            "Gemini/इंटरनेट उपलब्ध होने पर इसे फिर पूछना, या प्रश्न को स्पष्ट विषय और छोटे वाक्य में लिखना।\n\n"
                            "🌼 ज्ञान की ज्योति जलाए रखो। आयुष्मान भवः!\nध्यान रहे: ऑफलाइन संग्रह में चुने हुए विषयों के उत्तर हैं, दुनिया के हर प्रश्न का पूरा विश्वकोश नहीं।")
             status = "🟡 Offline Knowledge Book"
-        if not gemini_online:
-            ans += "\n\n⚠️ Gemini ऑनलाइन उत्तर नहीं दे पाया; ऊपर का उत्तर ऑफलाइन ज्ञान-संग्रह से है।\nतकनीकी स्थिति: " + str(gemini_status)[:240]
         st.session_state.chat_history.append(("assistant",ans))
         st.rerun()
     client, s = gemini_client()
@@ -640,6 +683,18 @@ def space_visualizers():
 # -------------------- ANALYTICS --------------------
 def analytics():
     section("Data & Analytics","📊")
+    try:
+        with db_connect() as conn:
+            visitor_total = conn.execute("SELECT COUNT(*) FROM visitor_sessions").fetchone()[0]
+            event_total = conn.execute("SELECT COUNT(*) FROM activity_events").fetchone()[0]
+        v1, v2 = st.columns(2)
+        v1.metric("Anonymous app sessions (database)", visitor_total)
+        v2.metric("Recorded events", event_total)
+        if st.session_state.get("activity_db_error"):
+            st.warning("Activity database warning: " + st.session_state.activity_db_error)
+        st.caption("These are anonymous app sessions, not verified unique children. Local SQLite storage may reset on redeploy/restart; use a hosted database for durable records.")
+    except Exception as exc:
+        st.warning(f"Activity database is not available: {str(exc)[:160]}")
     data=[
         ("Sessions",st.session_state.sessions),
         ("Games Played",st.session_state.games),
@@ -683,8 +738,17 @@ def admin():
         return
     c1,c2,c3=st.columns(3)
     c1.metric("🏫 Schools",len(st.session_state.schools))
-    c2.metric("🧑‍🎓 Students",len(st.session_state.students))
+    c2.metric("🧑‍🎓 Manually registered students",len(st.session_state.students))
     c3.metric("💬 Chats",st.session_state.chat)
+    try:
+        with db_connect() as conn:
+            visitor_total = conn.execute("SELECT COUNT(*) FROM visitor_sessions").fetchone()[0]
+            latest_visitors = conn.execute("SELECT visitor_id, first_seen, last_seen, visit_count FROM visitor_sessions ORDER BY last_seen DESC LIMIT 100").fetchall()
+        st.metric("🧭 Anonymous app sessions recorded", visitor_total)
+        st.caption("Auto-recorded sessions are not verified student identities. Do not treat this count as a count of individual children.")
+    except Exception as exc:
+        latest_visitors = []
+        st.warning(f"Could not read activity database: {str(exc)[:160]}")
     t1,t2,t3=st.tabs(["🏫 Manage Schools","🧑‍🎓 Student Database","📊 Activity"])
     with t1:
         with st.form("school_form"):
@@ -708,7 +772,12 @@ def admin():
         if st.session_state.students:
             st.dataframe(st.session_state.students,use_container_width=True)
     with t3:
-        st.write("Real activity recorded in this web session:")
+        st.write("Anonymous app sessions recorded in the local activity database:")
+        if latest_visitors:
+            st.dataframe([dict(row) for row in latest_visitors], use_container_width=True)
+        else:
+            st.info("अभी कोई anonymous session database में नहीं मिला।")
+        st.write("Detailed counters for this web session:")
         st.json({k:v for k,v in {
             "sessions":st.session_state.sessions,"games":st.session_state.games,
             "riddles":st.session_state.riddles,"chat":st.session_state.chat,
@@ -719,136 +788,13 @@ def admin():
         st.session_state.admin_ok=False
         st.rerun()
 
-# 50 bilingual questions: Hindi/English, mixed MCQ and short answer.
-CHALLENGE_QUESTIONS = [
-    {"hi": 'हमारे सौरमंडल में कितने ग्रह हैं?', "en": 'How many planets are in our Solar System?', "type": "mcq", "options_hi": ['7', '8', '9'], "options_en": ['7', '8', '9'], "correct": 1},
-    {"hi": 'सौरमंडल का सबसे बड़ा ग्रह कौन-सा है?', "en": 'Which is the largest planet in the Solar System?', "type": "mcq", "options_hi": ['मंगल', 'बृहस्पति', 'शुक्र'], "options_en": ['Mars', 'Jupiter', 'Venus'], "correct": 1},
-    {"hi": 'पृथ्वी का प्राकृतिक उपग्रह कौन है?', "en": 'What is Earth’s natural satellite?', "type": "mcq", "options_hi": ['चंद्रमा', 'सूर्य', 'मंगल'], "options_en": ['Moon', 'Sun', 'Mars'], "correct": 0},
-    {"hi": 'लाल ग्रह किसे कहा जाता है?', "en": 'Which planet is called the Red Planet?', "type": "mcq", "options_hi": ['शुक्र', 'मंगल', 'बुध'], "options_en": ['Venus', 'Mars', 'Mercury'], "correct": 1},
-    {"hi": 'सूर्य के सबसे निकट कौन-सा ग्रह है?', "en": 'Which planet is closest to the Sun?', "type": "mcq", "options_hi": ['बुध', 'पृथ्वी', 'शनि'], "options_en": ['Mercury', 'Earth', 'Saturn'], "correct": 0},
-    {"hi": 'वलयों के लिए प्रसिद्ध ग्रह कौन-सा है?', "en": 'Which planet is famous for its rings?', "type": "mcq", "options_hi": ['शनि', 'बुध', 'मंगल'], "options_en": ['Saturn', 'Mercury', 'Mars'], "correct": 0},
-    {"hi": 'हमारी आकाशगंगा का नाम क्या है?', "en": 'What is the name of our galaxy?', "type": "short", "answer": 'Milky Way', "options_hi": [], "options_en": []},
-    {"hi": 'दिन और रात मुख्यतः किस कारण होते हैं?', "en": 'What mainly causes day and night?', "type": "mcq", "options_hi": ['पृथ्वी का घूर्णन', 'पृथ्वी की परिक्रमा', 'चंद्रमा की गति'], "options_en": ['Earth’s rotation', 'Earth’s revolution', 'Moon’s motion'], "correct": 0},
-    {"hi": 'पृथ्वी सूर्य की एक परिक्रमा लगभग कितने समय में करती है?', "en": 'About how long does Earth take to orbit the Sun?', "type": "mcq", "options_hi": ['24 घंटे', '365 दिन', '30 दिन'], "options_en": ['24 hours', '365 days', '30 days'], "correct": 1},
-    {"hi": 'सूर्य क्या है?', "en": 'What is the Sun?', "type": "mcq", "options_hi": ['ग्रह', 'तारा', 'उपग्रह'], "options_en": ['Planet', 'Star', 'Satellite'], "correct": 1},
-    {"hi": 'आर्यभट्ट किस क्षेत्र से जुड़े महान विद्वान थे?', "en": 'Aryabhata was a renowned scholar of which field?', "type": "mcq", "options_hi": ['गणित और खगोल-विज्ञान', 'संगीत', 'चित्रकला'], "options_en": ['Mathematics and astronomy', 'Music', 'Painting'], "correct": 0},
-    {"hi": '7 × 8 कितना होता है?', "en": 'What is 7 × 8?', "type": "short", "answer": '56', "options_hi": [], "options_en": []},
-    {"hi": '100 का 25% कितना है?', "en": 'What is 25% of 100?', "type": "short", "answer": '25', "options_hi": [], "options_en": []},
-    {"hi": 'आयत का क्षेत्रफल कैसे निकालते हैं?', "en": 'How do you calculate the area of a rectangle?', "type": "mcq", "options_hi": ['लंबाई × चौड़ाई', '2 × लंबाई', 'लंबाई + चौड़ाई'], "options_en": ['Length × width', '2 × length', 'Length + width'], "correct": 0},
-    {"hi": 'वृत्त के क्षेत्रफल का सूत्र कौन-सा है?', "en": 'Which is the formula for the area of a circle?', "type": "mcq", "options_hi": ['2πr', 'πr²', 'πd'], "options_en": ['2πr', 'πr²', 'πd'], "correct": 1},
-    {"hi": 'त्रिभुज के कोणों का योग कितना होता है?', "en": 'What is the sum of the interior angles of a triangle?', "type": "mcq", "options_hi": ['90°', '180°', '360°'], "options_en": ['90°', '180°', '360°'], "correct": 1},
-    {"hi": 'एक दर्जन में कितनी वस्तुएँ होती हैं?', "en": 'How many items are in a dozen?', "type": "mcq", "options_hi": ['10', '12', '20'], "options_en": ['10', '12', '20'], "correct": 1},
-    {"hi": 'अभाज्य संख्या का सही उदाहरण कौन-सा है?', "en": 'Which is an example of a prime number?', "type": "mcq", "options_hi": ['9', '11', '15'], "options_en": ['9', '11', '15'], "correct": 1},
-    {"hi": 'जल का रासायनिक सूत्र क्या है?', "en": 'What is the chemical formula of water?', "type": "short", "answer": 'H2O', "options_hi": [], "options_en": []},
-    {"hi": 'पौधे प्रकाश-संश्लेषण में कौन-सी गैस लेते हैं?', "en": 'Which gas do plants take in for photosynthesis?', "type": "mcq", "options_hi": ['ऑक्सीजन', 'कार्बन डाइऑक्साइड', 'हीलियम'], "options_en": ['Oxygen', 'Carbon dioxide', 'Helium'], "correct": 1},
-    {"hi": 'मनुष्य साँस लेने के लिए मुख्यतः कौन-सी गैस उपयोग करता है?', "en": 'Which gas do humans mainly use for respiration?', "type": "mcq", "options_hi": ['ऑक्सीजन', 'नाइट्रोजन', 'हाइड्रोजन'], "options_en": ['Oxygen', 'Nitrogen', 'Hydrogen'], "correct": 0},
-    {"hi": 'समुद्र तल पर पानी लगभग किस तापमान पर उबलता है?', "en": 'At about what temperature does water boil at sea level?', "type": "mcq", "options_hi": ['0°C', '100°C', '50°C'], "options_en": ['0°C', '100°C', '50°C'], "correct": 1},
-    {"hi": 'बल की SI इकाई क्या है?', "en": 'What is the SI unit of force?', "type": "short", "answer": 'Newton', "options_hi": [], "options_en": []},
-    {"hi": 'ध्वनि किसमें यात्रा नहीं कर सकती?', "en": 'Through which medium can sound not travel?', "type": "mcq", "options_hi": ['हवा', 'पानी', 'निर्वात'], "options_en": ['Air', 'Water', 'Vacuum'], "correct": 2},
-    {"hi": 'मानव शरीर में रक्त पंप करने वाला अंग कौन है?', "en": 'Which organ pumps blood in the human body?', "type": "mcq", "options_hi": ['फेफड़े', 'हृदय', 'यकृत'], "options_en": ['Lungs', 'Heart', 'Liver'], "correct": 1},
-    {"hi": 'पृथ्वी की सतह का अधिकांश भाग किससे ढका है?', "en": 'What covers most of Earth’s surface?', "type": "mcq", "options_hi": ['पानी', 'रेत', 'बर्फ'], "options_en": ['Water', 'Sand', 'Ice'], "correct": 0},
-    {"hi": 'जल का जमने का तापमान लगभग कितना है?', "en": 'At about what temperature does water freeze?', "type": "mcq", "options_hi": ['0°C', '100°C', '25°C'], "options_en": ['0°C', '100°C', '25°C'], "correct": 0},
-    {"hi": 'कंप्यूटर मुख्यतः किस जानकारी को संसाधित करता है?', "en": 'What does a computer primarily process?', "type": "short", "answer": 'data', "options_hi": [], "options_en": []},
-    {"hi": 'AI पैटर्न सीखने के लिए आम तौर पर किसका उपयोग करता है?', "en": 'What does AI commonly use to learn patterns?', "type": "mcq", "options_hi": ['डेटा', 'केवल रंग', 'कोई जानकारी नहीं'], "options_en": ['Data', 'Only colours', 'No information'], "correct": 0},
-    {"hi": 'वेबसाइट खोलने के लिए सामान्यतः किसका उपयोग होता है?', "en": 'What is commonly used to open a website?', "type": "mcq", "options_hi": ['ब्राउज़र', 'कैलकुलेटर', 'कम्पास'], "options_en": ['Browser', 'Calculator', 'Compass'], "correct": 0},
-    {"hi": 'मजबूत पासवर्ड कैसा होना चाहिए?', "en": 'What should a strong password be like?', "type": "mcq", "options_hi": ['आसान और सबको पता', 'लंबा और अनुमान लगाना कठिन', 'अपना नाम मात्र'], "options_en": ['Easy and public', 'Long and hard to guess', 'Just your name'], "correct": 1},
-    {"hi": 'किसी अनजान व्यक्ति को OTP देना चाहिए?', "en": 'Should you share an OTP with a stranger?', "type": "mcq", "options_hi": ['हाँ', 'नहीं', 'केवल ऑनलाइन'], "options_en": ['Yes', 'No', 'Only online'], "correct": 1},
-    {"hi": 'एल्गोरिदम क्या है?', "en": 'What is an algorithm?', "type": "short", "answer": 'algorithm', "options_hi": [], "options_en": []},
-    {"hi": 'नेटवर्क किन चीज़ों को जोड़ सकता है?', "en": 'What can a network connect?', "type": "mcq", "options_hi": ['डिवाइस', 'केवल किताबें', 'केवल बादल'], "options_en": ['Devices', 'Only books', 'Only clouds'], "correct": 0},
-    {"hi": 'QR कोड को पढ़ने के लिए किसकी ज़रूरत हो सकती है?', "en": 'What may be used to read a QR code?', "type": "mcq", "options_hi": ['कैमरा या स्कैनर', 'थर्मामीटर', 'कम्पास'], "options_en": ['Camera or scanner', 'Thermometer', 'Compass'], "correct": 0},
-    {"hi": 'पर्यावरण प्रदूषण कम करने का एक तरीका क्या है?', "en": 'What is one way to reduce environmental pollution?', "type": "mcq", "options_hi": ['कचरा नदी में डालना', 'कचरे का सही प्रबंधन', 'पेड़ काटना'], "options_en": ['Dump waste in rivers', 'Manage waste properly', 'Cut trees'], "correct": 1},
-    {"hi": 'खाद्य श्रृंखला किसका प्रवाह दिखाती है?', "en": 'What does a food chain show?', "type": "mcq", "options_hi": ['ऊर्जा का प्रवाह', 'सड़क का नक्शा', 'ग्रहों की दूरी'], "options_en": ['Flow of energy', 'Road map', 'Planet distances'], "correct": 0},
-    {"hi": 'नवीकरणीय ऊर्जा का उदाहरण क्या है?', "en": 'Which is an example of renewable energy?', "type": "short", "answer": 'solar energy', "options_hi": [], "options_en": []},
-    {"hi": 'पृथ्वी के सबसे निकट तारा कौन है?', "en": 'Which star is closest to Earth?', "type": "mcq", "options_hi": ['सूर्य', 'सीरियस', 'ध्रुव तारा'], "options_en": ['Sun', 'Sirius', 'Polaris'], "correct": 0},
-    {"hi": 'चंद्रमा का अपना प्रकाश होता है?', "en": 'Does the Moon produce its own visible light?', "type": "mcq", "options_hi": ['हाँ', 'नहीं, यह सूर्य का प्रकाश परावर्तित करता है', 'केवल दिन में'], "options_en": ['Yes', 'No, it reflects sunlight', 'Only in daytime'], "correct": 1},
-    {"hi": 'छाया बनने के लिए क्या आवश्यक है?', "en": 'What is needed to form a shadow?', "type": "mcq", "options_hi": ['प्रकाश और कोई वस्तु', 'केवल ध्वनि', 'केवल हवा'], "options_en": ['Light and an object', 'Sound only', 'Air only'], "correct": 0},
-    {"hi": 'सही समय-सारणी किसमें मदद करती है?', "en": 'How does a timetable help?', "type": "mcq", "options_hi": ['काम व्यवस्थित करने में', 'समय रोकने में', 'गुरुत्वाकर्षण हटाने में'], "options_en": ['Organising tasks', 'Stopping time', 'Removing gravity'], "correct": 0},
-    {"hi": 'पृथ्वी का आकार सबसे अच्छा किससे वर्णित होता है?', "en": 'Which best describes Earth’s shape?', "type": "mcq", "options_hi": ['लगभग गोलाकार', 'समतल चौकोर', 'त्रिकोणीय'], "options_en": ['Nearly spherical', 'Flat square', 'Triangular'], "correct": 0},
-    {"hi": 'विटामिन D का प्राकृतिक स्रोत क्या हो सकता है?', "en": 'What can be a natural source of vitamin D?', "type": "short", "answer": 'thermometer', "options_hi": [], "options_en": []},
-    {"hi": 'पानी बचाने का अच्छा तरीका कौन-सा है?', "en": 'Which is a good way to conserve water?', "type": "mcq", "options_hi": ['नल खुला छोड़ना', 'लीक ठीक करना', 'साफ पानी बहाना'], "options_en": ['Leave taps running', 'Fix leaks', 'Waste clean water'], "correct": 1},
-    {"hi": 'किस उपकरण से तापमान मापा जाता है?', "en": 'Which instrument measures temperature?', "type": "mcq", "options_hi": ['थर्मामीटर', 'बारोमीटर', 'कम्पास'], "options_en": ['Thermometer', 'Barometer', 'Compass'], "correct": 0},
-    {"hi": 'कम्पास मुख्यतः क्या बताता है?', "en": 'What does a compass mainly indicate?', "type": "short", "answer": 'direction', "options_hi": [], "options_en": []},
-    {"hi": 'प्रोग्रामिंग में कोड क्या होता है?', "en": 'What is code in programming?', "type": "mcq", "options_hi": ['कंप्यूटर को दिए गए निर्देश', 'एक खनिज', 'मौसम'], "options_en": ['Instructions for a computer', 'A mineral', 'Weather'], "correct": 0},
-    {"hi": 'पुस्तकालय का मुख्य उद्देश्य क्या है?', "en": 'What is the main purpose of a library?', "type": "mcq", "options_hi": ['पढ़ने और सीखने के संसाधन देना', 'खेल का मैदान होना', 'खाना पकाना'], "options_en": ['Provide reading and learning resources', 'Be a playground', 'Cook food'], "correct": 0},
-    {"hi": 'वैज्ञानिक प्रयोग करते समय क्या करना चाहिए?', "en": 'What should you do during a scientific experiment?', "type": "mcq", "options_hi": ['ध्यान से निरीक्षण और रिकॉर्ड', 'परिणाम गढ़ना', 'सुरक्षा नियम भूलना'], "options_en": ['Observe and record carefully', 'Invent results', 'Ignore safety'], "correct": 0},
-]
-
-def question_challenge(title, key, counter="games"):
-    """Bilingual 50-question challenge. MCQs and short-answer questions are mixed."""
-    section(title, "🧠")
-    use_hindi = lang == "हिन्दी"
-    count_label = "कितने सवाल?" if use_hindi else "Number of questions"
-    count = st.selectbox(count_label, [5, 10, 15, 20, 50], index=0, key=f"{key}_count")
-    bank = list(CHALLENGE_QUESTIONS)
-    # Keep the same question order for a run so a rerender does not change the quiz.
-    chosen = bank[:count]
-    title_text = "सही विकल्प चुनें या उत्तर लिखें।" if use_hindi else "Choose the correct option or type your answer."
-    st.caption(title_text)
-    with st.form(f"{key}_form"):
-        answers = []
-        for i, q in enumerate(chosen, 1):
-            question = q["hi"] if use_hindi else q["en"]
-            st.markdown(f"**{i}. {question}**")
-            if q["type"] == "mcq":
-                opts = q["options_hi"] if use_hindi else q["options_en"]
-                pick_label = "अपना उत्तर चुनें" if use_hindi else "Select an answer"
-                value = st.radio(pick_label, opts, index=None, key=f"{key}_answer_{i}", horizontal=False)
-                answers.append(value)
-            else:
-                input_label = "उत्तर लिखें" if use_hindi else "Type your answer"
-                value = st.text_input(input_label, key=f"{key}_answer_{i}")
-                answers.append(value)
-        submitted = st.form_submit_button("जाँचें / Check answers")
-    if submitted:
-        score = 0
-        details = []
-        for i, (q, answer) in enumerate(zip(chosen, answers), 1):
-            if q["type"] == "mcq":
-                opts = q["options_hi"] if use_hindi else q["options_en"]
-                correct_text = opts[q["correct"]]
-                ok = answer == correct_text
-            else:
-                expected = q["answer"].strip().lower()
-                got = str(answer or "").strip().lower()
-                accepted = {expected}
-                if expected == "56": accepted.update({"fifty six", "छप्पन"})
-                if expected == "25": accepted.update({"twenty five", "पच्चीस"})
-                if expected == "h2o": accepted.update({"water", "पानी"})
-                if expected == "newton": accepted.update({"न्यूटन"})
-                if expected == "data": accepted.update({"डेटा"})
-                if expected == "algorithm": accepted.update({"एल्गोरिदम"})
-                if expected == "solar energy": accepted.update({"सौर ऊर्जा"})
-                if expected == "thermometer": accepted.update({"थर्मामीटर"})
-                if expected == "direction": accepted.update({"दिशा"})
-                if expected == "milky way": accepted.update({"आकाशगंगा"})
-                ok = got in accepted
-                correct_text = q["answer"]
-                if use_hindi:
-                    correct_text = {"milky way":"आकाशगंगा", "56":"56", "25":"25", "h2o":"H₂O", "newton":"न्यूटन", "data":"डेटा", "algorithm":"एल्गोरिदम", "solar energy":"सौर ऊर्जा", "thermometer":"थर्मामीटर", "direction":"दिशा"}.get(expected, correct_text)
-            if ok:
-                score += 1
-            else:
-                details.append((i, q["hi"] if use_hindi else q["en"], correct_text))
-        st.session_state[key + "_last_score"] = score
-        st.session_state[key + "_last_total"] = len(chosen)
-        if counter in st.session_state:
-            st.session_state[counter] += 1
-        st.success(("आपका स्कोर" if use_hindi else "Your score") + f": {score}/{len(chosen)}")
-        if details:
-            with st.expander("गलत उत्तर देखें / Review answers"):
-                for number, question, correct_answer in details:
-                    st.write(f"{number}. {question}")
-                    st.caption(("सही उत्तर: " if use_hindi else "Correct answer: ") + str(correct_answer))
-        else:
-            st.balloons()
-
 # -------------------- GAMES --------------------
 def games():
     section("Game Zone — 10 Games + Daily Quiz","🎮")
     game=st.selectbox("Choose a game",[
         "Guess the Number","Flip a Coin","Rock-Paper-Scissors","Color Matcher",
         "Roll the Dice","Math Quiz","Magic Ball 8","Word Scramble",
-        "Animal Guessing","Click Speed Test","Daily Quiz","AI Challenge","Brain Challenge"
+        "Animal Guessing","Click Speed Test","Daily Quiz"
     ])
     if game=="Guess the Number":
         target=st.session_state.setdefault("guess_target",random.randint(1,20))
@@ -922,17 +868,62 @@ def games():
             st.session_state.games+=1
         st.metric("Clicks recorded",st.session_state.clicks)
         if st.button("Reset Click Test"): st.session_state.clicks=0
-    elif game == "Daily Quiz":
-        question_challenge("Daily Quiz — दैनिक प्रश्न", "daily_quiz")
-    elif game == "AI Challenge":
-        st.info("AI Challenge में curated bilingual question bank है। खुले प्रश्नों के लिए AI Chatbot में Gemini ऑनलाइन उत्तर दे सकता है।")
-        question_challenge("AI Challenge — Aryabhutt Brain Quest", "ai_challenge")
     else:
-        question_challenge("Brain Challenge — सोचो और सीखो", "brain_challenge")
+        qs=[("How many planets are in our solar system?","8"),
+            ("Largest planet?","Jupiter"),
+            ("Aryabhata was a?","mathematician"),
+            ("Earth's natural satellite?","moon"),
+            ("What does AI learn from?","data")]
+        score=0
+        for i,(q,a) in enumerate(qs):
+            x=st.text_input(q,key=f"daily_{i}")
+            if x.strip().lower()==a.lower(): score+=1
+        if st.button("Check Daily Quiz"):
+            st.session_state.games+=1
+            st.success(f"Score: {score}/{len(qs)}")
 
 # -------------------- TREASURE HUNT --------------------
 def treasure_hunt():
-    question_challenge("Treasure Hunt — Mission Save Sia", "treasure_hunt", counter="games")
+    section("Treasure Hunt — Mission Save Sia","🧩")
+    st.write("20-question web mission based on the V5.6 learning themes: maths, astronomy, science, technology and Sia's story.")
+    questions=[
+        ("Who is the project named after?","Aryabhata"),
+        ("How many planets are in our solar system?","8"),
+        ("What is Earth's natural satellite?","Moon"),
+        ("Which planet is the largest?","Jupiter"),
+        ("Which planet is famous for rings?","Saturn"),
+        ("What is the name of our galaxy?","Milky Way"),
+        ("What does a computer process?","data"),
+        ("What does AI work with to learn patterns?","data"),
+        ("What is the formula for rectangle area?","l*b"),
+        ("What is the formula for circle area?","pi*r2"),
+        ("What is 7 × 8?","56"),
+        ("What is 25% of 100?","25"),
+        ("Which planet is called the Red Planet?","Mars"),
+        ("Which planet is closest to the Sun?","Mercury"),
+        ("What happens in Earth rotation?","day"),
+        ("What is a code?","instructions"),
+        ("What does a network connect?","devices"),
+        ("What is a gnomon useful for studying?","shadow"),
+        ("What is a timetable useful for?","study"),
+        ("What did Sia turn imagination into?","R-AI"),
+    ]
+    with st.form("treasure_form"):
+        answers=[]
+        for i,(q,a) in enumerate(questions,1):
+            answers.append(st.text_input(f"{i}. {q}",key=f"hunt_{i}"))
+        submitted=st.form_submit_button("🚀 Finish Mission")
+    if submitted:
+        score=0
+        for ans,(_,expected) in zip(answers,questions):
+            a=ans.strip().lower()
+            e=expected.lower()
+            if e in a or (e=="data" and "data" in a) or (e=="day" and ("day" in a or "night" in a)):
+                score+=1
+        st.session_state.riddles+=score
+        st.success(f"Mission complete: {score}/{len(questions)}")
+        if score>=15: st.balloons()
+        st.info("Learning tip: score se zyada important hai ki galat answers ko dobara samjha जाए।")
 
 # -------------------- REPORTS / FEEDBACK / SETTINGS --------------------
 def reports():
@@ -1025,7 +1016,7 @@ with st.sidebar:
     st.markdown("### 🪷 PROJECT ARYABHUTT")
     st.caption("V5.6 WEB • Learn • Visualize • Practice • Explore • Track")
     page=st.radio("Menu",[
-        "Home","AI Chatbot","Offline Knowledge Library","QR Scanner","AI Challenge","Treasure Hunt","Game Zone","Study Center",
+        "Home","AI Chatbot","Offline Knowledge Library","QR Scanner","Treasure Hunt","Game Zone","Study Center",
         "Space & Visualizers","Data & Analytics","Reports","Feedback","Settings",
         "Teacher / Admin"
     ])
@@ -1036,7 +1027,6 @@ with st.sidebar:
 
 if page=="Home": home()
 elif page=="AI Chatbot": chatbot()
-elif page=="AI Challenge": question_challenge("AI Challenge — Aryabhutt Brain Quest", "sidebar_ai_challenge")
 elif page=="Offline Knowledge Library": offline_library()
 elif page=="QR Scanner": scanner_page()
 elif page=="Game Zone": games()
