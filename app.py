@@ -8,11 +8,13 @@ import streamlit.components.v1 as components
 # Optional Gemini
 try:
     from google import genai
+    from google.genai import types as genai_types
 except Exception:
     genai = None
+    genai_types = None
 
 APP_NAME = "PROJECT ARYABHUTT"
-VERSION = "V5.6 WEB • RESTORED STUDY EDITION"
+VERSION = "V5.6 WEB • RESTORED STUDY + 50-QUESTION CHALLENGES"
 GEMINI_MODEL = "gemini-3.8-flash"  # Model name confirmed by the API error returned to the user
 
 st.set_page_config(page_title=APP_NAME, page_icon="🪷", layout="wide")
@@ -277,12 +279,16 @@ def gemini_client():
     if not key:
         return None, "GEMINI_API_KEY नहीं मिला"
     try:
+        # Bound network wait so the chat never spins for minutes.
+        http_options = genai_types.HttpOptions(timeout=10000) if genai_types else None
+        if http_options is not None:
+            return genai.Client(api_key=key, http_options=http_options), "ready"
         return genai.Client(api_key=key), "ready"
     except Exception as e:
         return None, str(e)[:120]
 
 def gemini_answer(prompt):
-    """Hindi-first Aryabhatt persona with short conversational memory."""
+    """Hindi-first Aryabhatt-inspired persona; network wait is bounded by HttpOptions."""
     client, status = gemini_client()
     if client is None:
         return None, status
@@ -290,45 +296,41 @@ def gemini_answer(prompt):
     history = st.session_state.get("chat_history", [])[-8:]
     context_lines = []
     for role, msg in history:
-        label = "विद्यार्थी" if role == "user" else "आर्यभट्ट"
+        label = "जिज्ञासु विद्यार्थी" if role == "user" else "आचार्य आर्यभट्ट"
         context_lines.append(f"{label}: {msg}")
     conversation = "\n".join(context_lines)
 
     system_prompt = (
-        "आप PROJECT ARYABHUTT के 'आचार्य आर्यभट्ट' ज्ञान-सहायक हैं।\\n"
-        "आपका संवाद एक शांत, विद्वान, जिज्ञासु और सम्मानपूर्ण आचार्य जैसा होना चाहिए—सरल, स्वाभाविक और आत्मीय; "
-        "बच्चों जैसी भाषा, baby-talk, 'young learner', 'kid', 'बच्चा' या बनावटी संबोधन बिल्कुल न करें।\\n"
-        "मुख्य उत्तर हमेशा स्वाभाविक, स्पष्ट और सहज हिंदी (देवनागरी) में दें। "
-        "प्रश्न English में हो तब भी उत्तर हिंदी में दें, जब तक उपयोगकर्ता स्पष्ट रूप से English answer न मांगे।\\n"
-        "जरूरी scientific/proper terms English में रख सकते हैं और उनका अर्थ हिंदी में समझाएँ।\\n"
-        "उत्तर तथ्यात्मक, उपयोगी और पर्याप्त हों। तथ्य न गढ़ें। जहाँ जानकारी निश्चित न हो, साफ बताएं।\\n"
-        "आर्यभट्ट की वैज्ञानिक परंपरा से प्रेरित होकर गणित, तर्क, observation, प्रमाण और जिज्ञासा को प्रोत्साहित करें; "
-        "लेकिन स्वयं को वास्तविक ऐतिहासिक आर्यभट्ट न बताएं।\\n"
-        "हर उत्तर को जबरन एक ही वाक्य से समाप्त न करें। संदर्भ के अनुसार कभी-कभी "
-        "'आयुष्मान भव।' या 'ज्ञान की ज्योति जलाए रखो।' जैसे सम्मानपूर्ण समापन कह सकते हैं। "
-        "जहाँ स्वाभाविक हो, अंत में एक छोटा विचारोत्तेजक follow-up प्रश्न पूछें ताकि संवाद जारी रहे।\\n\\n"
-        "पिछली बातचीत का संदर्भ:\\n" + (conversation or "कोई पिछली बातचीत नहीं") + "\\n\\n"
+        "तुम PROJECT ARYABHUTT के 'आचार्य आर्यभट्ट' से प्रेरित ज्ञान-सहायक हो।\n"
+        "आवाज़ और अंदाज़: प्राचीन भारतीय विद्वान आचार्य जैसा आत्मीय, धैर्यवान, ज्ञानपूर्ण और सहज; कठोर या रोबोट जैसा नहीं।\n"
+        "विद्यार्थी को 'वत्स', 'प्रिय बालक' या 'प्रिय जिज्ञासु' कह सकते हो। संबोधन में 'आप/आपको/आपसे' बार-बार मत कहो; सहज और स्नेहपूर्ण 'तुम/तुम्हें/तुमसे' प्रयोग करो।"
+        "एक ही उत्तर में बार-बार संबोधन न दो। 'बच्चे' या baby-talk न करो।\n"
+        "उत्तर मुख्यतः सरल, स्वाभाविक हिंदी देवनागरी में हो, भले प्रश्न अंग्रेज़ी में हो। वैज्ञानिक/तकनीकी शब्द ज़रूरत पर अंग्रेज़ी में रखकर समझाओ।\n"
+        "पहले प्रश्न का सीधा और उपयोगी उत्तर दो। ज़रूरत से ज़्यादा भूमिका न बाँधो। तथ्य न गढ़ो; अनिश्चितता साफ बताओ।\n"
+        "गणित, तर्क, प्रमाण, प्रेक्षण और जिज्ञासा को प्रोत्साहित करो। स्वयं को ऐतिहासिक आर्यभट्ट होने का दावा मत करो; कहो कि शैली उनसे प्रेरित है।\n"
+        "हर उत्तर के अंत में यह छोटा, आत्मीय समापन जोड़ो: '🌼 ज्ञान की ज्योति जलाए रखो, प्रिय बालक। आयुष्मान भवः!\nअब बताओ, अगली कौन-सी जिज्ञासा सुलझाएँ?'\n\n"
+        "पिछली बातचीत का संदर्भ:\n" + (conversation or "यह पहली बातचीत है।") + "\n\n"
         "नया प्रश्न: " + str(prompt)
     )
-    last_error = None
-    for attempt in range(2):
-        try:
-            r = client.models.generate_content(model=GEMINI_MODEL, contents=system_prompt)
-            answer = getattr(r, "text", None)
-            if answer and str(answer).strip():
-                answer = str(answer).strip()
-                # Light-touch persona polish if the model forgets the Aryabhatt voice.
-                if not any(x in answer for x in ("आर्यभट्ट", "ज्ञान की ज्योति", "आयुष्मान भव", "वत्स", "प्रिय विद्यार्थी")):
-                    answer += "\n\n🌼 ज्ञान की ज्योति जलाए रखो। आयुष्मान भवः!\nअब बताओ, अगला कौन-सा प्रश्न तुम्हारी जिज्ञासा जगा रहा है?"
-                return answer, "🟢 Gemini Online"
-            return None, "Gemini ने खाली उत्तर दिया"
-        except Exception as e:
-            last_error = str(e).replace("\n", " ")[:180]
-            if attempt == 0 and ("503" in last_error or "UNAVAILABLE" in last_error or "high demand" in last_error.lower()):
-                time.sleep(1.2)
-                continue
-            break
-    return None, (last_error or "Gemini सेवा अभी उपलब्ध नहीं है")
+    try:
+        # Single attempt + 10-second HTTP timeout: do not retry into a long spinner.
+        r = client.models.generate_content(model=GEMINI_MODEL, contents=system_prompt)
+        answer = getattr(r, "text", None)
+        if answer and str(answer).strip():
+            answer = str(answer).strip()
+            signoff = "🌼 ज्ञान की ज्योति जलाए रखो, प्रिय बालक। आयुष्मान भवः!\nअब बताओ, अगली कौन-सी जिज्ञासा सुलझाएँ?"
+            # Keep one consistent Aryabhatt-inspired ending without duplicate sign-offs.
+            for marker in ("🌼 ज्ञान की ज्योति जलाए रखो", "आयुष्मान भवः", "आयुष्मान भव।"):
+                pos = answer.find(marker)
+                if pos >= 0:
+                    answer = answer[:pos].rstrip()
+                    break
+            answer = answer + "\n\n" + signoff
+            return answer, "🟢 Gemini Online"
+        return None, "Gemini ने खाली उत्तर दिया"
+    except Exception as e:
+        last_error = str(e).replace("\n", " ").strip()[:180]
+        return None, last_error or "Gemini सेवा अभी उपलब्ध नहीं है"
 
 def browser_voice(text, key):
     """Render a browser Hindi voice button for the supplied answer."""
@@ -712,13 +714,170 @@ def admin():
         st.session_state.admin_ok=False
         st.rerun()
 
+
+# -------------------- QUESTION BANKS / CHALLENGES --------------------
+# Each item: (question, acceptable answers). These are local/offline banks,
+# so the challenges remain usable even when Gemini is temporarily unavailable.
+QUESTION_COUNTS = [5, 10, 15, 20, 50]
+CHALLENGE_QUESTIONS = [
+    ("Who is the project named after?", ["Aryabhata", "Aryabhatta"]),
+    ("How many planets are in our solar system?", ["8", "eight", "आठ"]),
+    ("What is Earth's natural satellite?", ["Moon", "the moon", "चंद्रमा", "चाँद"]),
+    ("Which is the largest planet?", ["Jupiter", "बृहस्पति"]),
+    ("Which planet is famous for its rings?", ["Saturn", "शनि"]),
+    ("What is the name of our galaxy?", ["Milky Way", "the milky way", "आकाशगंगा"]),
+    ("What does a computer process?", ["data", "डेटा", "instructions", "सूचना"]),
+    ("What does AI learn patterns from?", ["data", "डेटा", "examples", "उदाहरण"]),
+    ("What is the area formula for a rectangle?", ["l*b", "l × b", "length*breadth", "length x breadth", "लंबाई × चौड़ाई"]),
+    ("What is the area formula for a circle?", ["pi*r2", "πr²", "pi r squared", "πr^2"]),
+    ("What is 7 × 8?", ["56", "fifty six"]),
+    ("What is 25% of 100?", ["25", "twenty five"]),
+    ("Which planet is called the Red Planet?", ["Mars", "मंगल"]),
+    ("Which planet is closest to the Sun?", ["Mercury", "बुध"]),
+    ("Earth's rotation causes what daily cycle?", ["day and night", "दिन रात", "दिन और रात", "day", "दिन"]),
+    ("What is a computer program made of?", ["instructions", "code", "निर्देश"]),
+    ("What does a computer network connect?", ["devices", "computers", "उपकरण"]),
+    ("A gnomon is useful for studying what?", ["shadow", "shadows", "छाया"]),
+    ("What is a timetable useful for?", ["planning", "study", "समय प्रबंधन", "पढ़ाई"]),
+    ("In the project story, what is Sia's imagination linked with?", ["R-AI", "rai", "innovation"]),
+    ("What is the chemical formula of water?", ["H2O", "h2o", "जल"]),
+    ("Which gas do plants absorb for photosynthesis?", ["carbon dioxide", "co2", "कार्बन डाइऑक्साइड"]),
+    ("Which gas do humans need for respiration?", ["oxygen", "o2", "ऑक्सीजन"]),
+    ("What force pulls objects toward Earth?", ["gravity", "गुरुत्वाकर्षण"]),
+    ("At sea level, water boils at how many degrees Celsius?", ["100", "100 c", "100°C"]),
+    ("How many sides does a triangle have?", ["3", "three", "तीन"]),
+    ("How many degrees are in a right angle?", ["90", "90 degrees", "90°"]),
+    ("What is 12 × 12?", ["144", "one hundred forty four"]),
+    ("What is half of 50?", ["25", "twenty five"]),
+    ("What is the perimeter of a square with side a?", ["4a", "4*a", "four a"]),
+    ("What is the value of pi approximately?", ["3.14", "3.1416"]),
+    ("What is the smallest prime number?", ["2", "two", "दो"]),
+    ("What is the place value of 5 in 500?", ["500", "five hundred"]),
+    ("What is an algorithm?", ["step by step instructions", "steps to solve a problem", "निर्देशों के चरण"]),
+    ("What does URL help identify?", ["web address", "website address", "वेब पता"]),
+    ("What should you never share online?", ["password", "passwords", "otp", "private information", "पासवर्ड"]),
+    ("What is a strong password usually like?", ["long and unique", "unique", "लंबा और अलग"]),
+    ("What does a robot use to sense its surroundings?", ["sensors", "sensor", "सेंसर"]),
+    ("What is the Sun?", ["star", "a star", "तारा"]),
+    ("What is the name of Earth's star?", ["Sun", "the Sun", "सूर्य"]),
+    ("Which planet is known for its Great Red Spot?", ["Jupiter", "बृहस्पति"]),
+    ("Which planet is tilted dramatically on its side?", ["Uranus", "अरुण"]),
+    ("What do we call frozen water?", ["ice", "बर्फ"]),
+    ("What is the process by which liquid water becomes vapor?", ["evaporation", "वाष्पीकरण"]),
+    ("What is the center of an atom called?", ["nucleus", "नाभिक"]),
+    ("Which organ pumps blood around the body?", ["heart", "हृदय"]),
+    ("What is the main source of energy for Earth's surface?", ["Sun", "sunlight", "सूर्य"]),
+    ("What is 9 squared?", ["81", "eighty one"]),
+    ("How many minutes are in one hour?", ["60", "sixty"]),
+    ("What should you do when an AI answer seems doubtful?", ["verify it", "check reliable sources", "verify", "जाँचें", "सत्यापित करें"]),
+]
+RIDDLE_QUESTIONS = [
+    ("I have hands but cannot clap. What am I?", ["clock", "घड़ी"]),
+    ("I have keys but open no locks. What am I?", ["piano", "keyboard", "पियानो", "कीबोर्ड"]),
+    ("The more you take, the more you leave behind. What are they?", ["footsteps", "footprints", "कदमों के निशान"]),
+    ("I have a face and two hands but no arms or legs. What am I?", ["clock", "घड़ी"]),
+    ("What gets wetter as it dries?", ["towel", "तौलिया"]),
+    ("What has one eye but cannot see?", ["needle", "सुई"]),
+    ("What has many teeth but cannot bite?", ["comb", "कंघी"]),
+    ("What has a neck but no head?", ["bottle", "बोतल"]),
+    ("What can travel around the world while staying in a corner?", ["stamp", "डाक टिकट"]),
+    ("What has words but never speaks?", ["book", "किताब"]),
+    ("What has four legs but cannot walk?", ["table", "chair", "मेज", "कुर्सी"]),
+    ("What goes up but never comes down?", ["age", "उम्र"]),
+    ("What has a ring but no finger?", ["telephone", "phone", "टेलीफोन"]),
+    ("What can you catch but not throw?", ["cold", "सर्दी"]),
+    ("What has a head and a tail but no body?", ["coin", "सिक्का"]),
+    ("What has cities but no houses, rivers but no water?", ["map", "नक्शा"]),
+    ("What has to be broken before you can use it?", ["egg", "अंडा"]),
+    ("What has branches but no fruit, trunk, or leaves?", ["bank", "बैंक"]),
+    ("What begins with T, ends with T, and has T inside?", ["teapot", "टीपॉट"]),
+    ("What has 13 hearts but no other organs?", ["deck of cards", "cards", "ताश की गड्डी"]),
+    ("What has a thumb and four fingers but is not alive?", ["glove", "दस्ताना"]),
+    ("What has a bed but never sleeps and a mouth but never eats?", ["river", "नदी"]),
+    ("What can fill a room but takes no space?", ["light", "प्रकाश"]),
+    ("What has a bottom at the top?", ["legs", "your legs", "पैर"]),
+    ("What has an endless supply of letters but starts empty?", ["mailbox", "letterbox", "डाक पेटी"]),
+    ("What has a spine but no bones?", ["book", "किताब"]),
+    ("What has ears but cannot hear?", ["corn", "मक्का"]),
+    ("What kind of room has no doors or windows?", ["mushroom", "मशरूम"]),
+    ("What can be cracked, made, told, and played?", ["joke", "चुटकुला"]),
+    ("What has a bark but no bite?", ["tree", "पेड़"]),
+    ("What has a tail and a head but no legs?", ["coin", "सिक्का"]),
+    ("What goes through towns and over hills but never moves?", ["road", "सड़क"]),
+    ("What can you serve but never eat?", ["tennis ball", "volleyball", "ball"]),
+    ("What has lots of eyes but cannot see?", ["potato", "आलू"]),
+    ("What has many needles but does not sew?", ["pine tree", "pine", "चीड़ का पेड़"]),
+    ("What has a tongue but cannot talk?", ["shoe", "जूता"]),
+    ("What has a lock but no key?", ["hair", "बाल"]),
+    ("What can run but never walks?", ["water", "पानी"]),
+    ("What has no life but can die?", ["battery", "बैटरी"]),
+    ("What has a roof but no walls?", ["tent", "तंबू"]),
+    ("What can be opened but has no lid or door?", ["mind", "मन"]),
+    ("What has a ring around its finger but is not a person?", ["saturn", "शनि"]),
+    ("What is always in front of you but cannot be seen?", ["future", "भविष्य"]),
+    ("What has a heart that doesn't beat?", ["artichoke", "अर्टिचोक"]),
+    ("What is full of holes but still holds water?", ["sponge", "स्पंज"]),
+    ("What has a face but no eyes, nose, or mouth?", ["clock", "घड़ी"]),
+    ("What has a web but is not a website?", ["spider", "मकड़ी"]),
+    ("What gets bigger the more you take away?", ["hole", "गड्ढा"]),
+    ("What has an eye at the center but cannot see?", ["hurricane", "storm", "तूफान"]),
+    ("What can you keep after giving it to someone?", ["your word", "promise", "वादा"]),
+]
+
+def _normalise_answer(value):
+    value = str(value or "").strip().lower()
+    for ch in ".,!?;:()[]{}\"'`^":
+        value = value.replace(ch, "")
+    return " ".join(value.split())
+
+def answer_matches(given, accepted):
+    g = _normalise_answer(given)
+    if not g:
+        return False
+    for option in accepted:
+        a = _normalise_answer(option)
+        if g == a:
+            return True
+        # Allow a longer natural-language answer for phrase answers, but avoid
+        # numeric substring mistakes such as matching 8 inside 18.
+        if len(a) >= 5 and (a in g or g in a):
+            return True
+    return False
+
+def question_challenge(title, bank, key_prefix, counter="games"):
+    section(title, "🧠")
+    count = st.selectbox("कितने सवाल हल करने हैं?", QUESTION_COUNTS,
+                         index=1, key=f"{key_prefix}_count")
+    st.caption(f"Question bank: {len(bank)} सवाल • चुने गए: {count}")
+    with st.form(f"{key_prefix}_form"):
+        answers = []
+        for i, (question, _accepted) in enumerate(bank[:count], 1):
+            answers.append(st.text_input(f"{i}. {question}", key=f"{key_prefix}_answer_{i}"))
+        submitted = st.form_submit_button("✅ उत्तर जाँचें")
+    if submitted:
+        score = sum(answer_matches(ans, item[1]) for ans, item in zip(answers, bank[:count]))
+        st.session_state[counter] += 1
+        if key_prefix in ("riddle_challenge", "treasure"):
+            st.session_state.riddles += score
+        st.session_state[f"{key_prefix}_last_score"] = (score, count)
+    result = st.session_state.get(f"{key_prefix}_last_score")
+    if result:
+        score, total = result
+        st.success(f"स्कोर: {score}/{total}")
+        if score == total:
+            st.balloons()
+        elif score >= total * 0.7:
+            st.info("बहुत अच्छा! गलत उत्तरों को फिर से समझकर दोबारा प्रयास करो।")
+        else:
+            st.info("अच्छी कोशिश! सवालों को पढ़कर फिर प्रयास करो—अभ्यास से सुधार होता है।")
+
 # -------------------- GAMES --------------------
 def games():
     section("Game Zone — 10 Games + Daily Quiz","🎮")
     game=st.selectbox("Choose a game",[
         "Guess the Number","Flip a Coin","Rock-Paper-Scissors","Color Matcher",
         "Roll the Dice","Math Quiz","Magic Ball 8","Word Scramble",
-        "Animal Guessing","Click Speed Test","Daily Quiz"
+        "Animal Guessing","Click Speed Test","Daily Quiz","AI Challenge","Riddle Challenge"
     ])
     if game=="Guess the Number":
         target=st.session_state.setdefault("guess_target",random.randint(1,20))
@@ -792,62 +951,18 @@ def games():
             st.session_state.games+=1
         st.metric("Clicks recorded",st.session_state.clicks)
         if st.button("Reset Click Test"): st.session_state.clicks=0
+    elif game == "Daily Quiz":
+        question_challenge("Daily Quiz — दैनिक प्रश्न", CHALLENGE_QUESTIONS, "daily_quiz")
+    elif game == "AI Challenge":
+        st.info("AI Challenge: science, maths, astronomy, coding और reasoning का mixed challenge. यह curated question bank offline भी चलता है।")
+        question_challenge("AI Challenge — Aryabhutt Brain Quest", CHALLENGE_QUESTIONS, "ai_challenge")
     else:
-        qs=[("How many planets are in our solar system?","8"),
-            ("Largest planet?","Jupiter"),
-            ("Aryabhata was a?","mathematician"),
-            ("Earth's natural satellite?","moon"),
-            ("What does AI learn from?","data")]
-        score=0
-        for i,(q,a) in enumerate(qs):
-            x=st.text_input(q,key=f"daily_{i}")
-            if x.strip().lower()==a.lower(): score+=1
-        if st.button("Check Daily Quiz"):
-            st.session_state.games+=1
-            st.success(f"Score: {score}/{len(qs)}")
+        question_challenge("Riddle Challenge — 50 पहेलियाँ", RIDDLE_QUESTIONS, "riddle_challenge")
 
 # -------------------- TREASURE HUNT --------------------
 def treasure_hunt():
-    section("Treasure Hunt — Mission Save Sia","🧩")
-    st.write("20-question web mission based on the V5.6 learning themes: maths, astronomy, science, technology and Sia's story.")
-    questions=[
-        ("Who is the project named after?","Aryabhata"),
-        ("How many planets are in our solar system?","8"),
-        ("What is Earth's natural satellite?","Moon"),
-        ("Which planet is the largest?","Jupiter"),
-        ("Which planet is famous for rings?","Saturn"),
-        ("What is the name of our galaxy?","Milky Way"),
-        ("What does a computer process?","data"),
-        ("What does AI work with to learn patterns?","data"),
-        ("What is the formula for rectangle area?","l*b"),
-        ("What is the formula for circle area?","pi*r2"),
-        ("What is 7 × 8?","56"),
-        ("What is 25% of 100?","25"),
-        ("Which planet is called the Red Planet?","Mars"),
-        ("Which planet is closest to the Sun?","Mercury"),
-        ("What happens in Earth rotation?","day"),
-        ("What is a code?","instructions"),
-        ("What does a network connect?","devices"),
-        ("What is a gnomon useful for studying?","shadow"),
-        ("What is a timetable useful for?","study"),
-        ("What did Sia turn imagination into?","R-AI"),
-    ]
-    with st.form("treasure_form"):
-        answers=[]
-        for i,(q,a) in enumerate(questions,1):
-            answers.append(st.text_input(f"{i}. {q}",key=f"hunt_{i}"))
-        submitted=st.form_submit_button("🚀 Finish Mission")
-    if submitted:
-        score=0
-        for ans,(_,expected) in zip(answers,questions):
-            a=ans.strip().lower()
-            e=expected.lower()
-            if e in a or (e=="data" and "data" in a) or (e=="day" and ("day" in a or "night" in a)):
-                score+=1
-        st.session_state.riddles+=score
-        st.success(f"Mission complete: {score}/{len(questions)}")
-        if score>=15: st.balloons()
-        st.info("Learning tip: score se zyada important hai ki galat answers ko dobara samjha जाए।")
+    st.write("Maths, astronomy, science, technology और Sia's story पर आधारित 50-question mission. पहले अपनी challenge length चुनें।")
+    question_challenge("Treasure Hunt — Mission Save Sia", CHALLENGE_QUESTIONS, "treasure", counter="games")
 
 # -------------------- REPORTS / FEEDBACK / SETTINGS --------------------
 def reports():
@@ -940,7 +1055,7 @@ with st.sidebar:
     st.markdown("### 🪷 PROJECT ARYABHUTT")
     st.caption("V5.6 WEB • Learn • Visualize • Practice • Explore • Track")
     page=st.radio("Menu",[
-        "Home","AI Chatbot","Offline Knowledge Library","QR Scanner","Treasure Hunt","Game Zone","Study Center",
+        "Home","AI Chatbot","AI Challenge","Offline Knowledge Library","QR Scanner","Treasure Hunt","Game Zone","Study Center",
         "Space & Visualizers","Data & Analytics","Reports","Feedback","Settings",
         "Teacher / Admin"
     ])
@@ -951,6 +1066,7 @@ with st.sidebar:
 
 if page=="Home": home()
 elif page=="AI Chatbot": chatbot()
+elif page=="AI Challenge": question_challenge("AI Challenge — Aryabhutt Brain Quest", CHALLENGE_QUESTIONS, "sidebar_ai_challenge")
 elif page=="Offline Knowledge Library": offline_library()
 elif page=="QR Scanner": scanner_page()
 elif page=="Game Zone": games()
